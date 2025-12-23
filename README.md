@@ -34,7 +34,7 @@ O projeto utiliza o sistema de segredos do Streamlit. Você precisa criar um arq
 ```toml
 INTERCOM_TOKEN = "seu_token_de_acesso_aqui"
 INTERCOM_APP_ID = "seu_app_id_aqui"
-
+```
 ### 3. Executar a Aplicação
 
 ```bash
