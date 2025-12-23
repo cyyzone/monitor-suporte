@@ -25,7 +25,7 @@ O projeto foi construído em **Python** utilizando **Streamlit** para a visualiz
 
 ```bash
 pip install -r requirements.txt
-
+```
 ### 2. Configurar as Credenciais (Secrets)
 
 O projeto utiliza o sistema de segredos do Streamlit. Você precisa criar um arquivo `.streamlit/secrets.toml` na raiz do projeto com as suas chaves do Intercom:
@@ -39,7 +39,7 @@ INTERCOM_APP_ID = "seu_app_id_aqui"
 
 ```bash
 streamlit run dashboard_visual.py
-
+```
 ## 🐳 Executar com DevContainers
 
 Este projeto inclui configuração para **DevContainers**. Se usar o VS Code:
