@@ -268,7 +268,7 @@ while True:
             hist_dados = []
             for conv in ultimas_conversas:
                 # arruma a hora pra ficar legivel
-                dt_obj = datetime.fromtimestamp(conv['created_at'])
+                dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
                 hora_fmt = dt_obj.strftime('%H:%M')
                 
                 # tenta achar o nome do agente, se nao tiver eh sem dono
@@ -304,5 +304,8 @@ while True:
                 st.info("Nenhuma conversa hoje.")
 
 
-        time.sleep(60) # espera 1 minuto e roda tudo de novo
+        # Pausa 60 segundos e REINICIA o script do zero (limpa a memória)
+        time.sleep(60)
+        st.rerun()
+
 
