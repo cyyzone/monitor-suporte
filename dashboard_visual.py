@@ -285,13 +285,19 @@ with placeholder.container():
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
-                column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
-                hide_index=True, disabled=True, use_container_width=True
+                column_config={
+                    "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")
+                },
+                hide_index=True,
+                disabled=True,
+                use_container_width=True,
+                key="lista_historico" # <--- ADICIONE ESTA LINHA (com a vírgula antes)
             )
         else:
             st.info("Nenhuma conversa hoje.")
 
 time.sleep(60)
 st.rerun()
+
 
 
