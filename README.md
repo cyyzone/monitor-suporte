@@ -1,25 +1,39 @@
-# 📊 Monitor de Suporte - CS
+# 📊 Monitor de Suporte - CS (Intercom)
 
-Painel de controle em tempo real para equipes de Customer Success (CS). Este dashboard conecta-se à API do Intercom para monitorar a fila de espera, o volume de tickets e a performance individual dos agentes.
+Este projeto é uma suite de monitoramento para equipes de Customer Success, dividida em dois painéis estratégicos: **Operacional** (Tempo Real) e **Qualidade** (CSAT Analítico).
 
-O projeto foi construído em **Python** utilizando **Streamlit** para a visualização e **Pandas** para o tratamento de dados.
+O objetivo é fornecer visibilidade imediata sobre a fila e produtividade, além de uma análise profunda da satisfação do cliente, consumindo a API do Intercom.
 
-## 🚀 Funcionalidades
+## 🚀 Módulos do Projeto
 
-* **Monitoramento da Fila:** Alerta crítico visual quando existem clientes sem atribuição (fila de espera).
-* **Status da Equipe:** Visualização rápida de quem está "Online" ou "Ausente" no Intercom.
-* **Métricas em Tempo Real:**
-    * Contagem de tickets abertos e pausados por agente.
-    * Volume total do dia vs. Volume recente (últimos 30 minutos).
-* **Alertas Visuais Automáticos:** Ícones que indicam sobrecarga ou picos de atendimento.
-* **Histórico Recente:** Lista das últimas conversas atribuídas.
-* **Auto-refresh:** O painel atualiza automaticamente a cada 60 segundos.
+O sistema foi separado em dois dashboards para garantir performance e foco:
+
+### 1. 🚀 Dashboard Operacional (`dashboard_operacional.py`)
+Focado na **velocidade**. É leve e atualiza automaticamente a cada 60 segundos. Ideal para ficar na TV da sala.
+* **Monitoramento de Fila:** Alerta visual crítico para clientes aguardando atendimento.
+* **Status em Tempo Real:** Quem está Online vs. Ausente (Away).
+* **Métricas de Fluxo:** Volume do dia e Volume recente (últimos 30 min) para identificar picos de demanda.
+* **Alertas de Sobrecarga:** Identifica agentes com muitos tickets abertos simultaneamente.
+
+### 2. ⭐ Dashboard de Qualidade (`dashboard_csat.py`)
+Focado na **análise**. Processa o histórico completo do mês atual, buscando tickets antigos que receberam avaliação recente.
+* **CSAT Global (Time):** Cálculo padrão de mercado (considera avaliações Neutras).
+* **CSAT Individual (Ajustado):** Cálculo justo para o agente (ignora avaliações Neutras).
+* **Detalhamento:** Tabela com contagem de notas Positivas (4-5), Neutras (3) e Negativas (1-2).
+* **Busca Profunda:** Varre conversas atualizadas no mês para garantir que nenhuma nota seja perdida.
+
+---
 
 ## 🛠️ Instalação e Configuração
 
 ### Pré-requisitos
 * Python 3.11+
 * Conta no Intercom com permissões de API.
+
+### 1. Instalar Dependências
+
+```bash
+pip install -r requirements.txt
 
 ### 1. Instalar Dependências
 
