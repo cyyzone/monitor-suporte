@@ -119,6 +119,29 @@ def get_daily_stats(team_id, minutos_recente=30):
         return total_dia, total_recente, stats_dia, stats_30min
     except: return 0, 0, {}, {}
 
+def get_latest_conversations(team_id, limit=10):
+    try:
+        fuso_br = timezone(timedelta(hours=-3))
+        ts_hoje = int(datetime.now(fuso_br).replace(hour=0, minute=0, second=0).timestamp())
+
+        url = "https://api.intercom.io/conversations/search"
+        payload = {
+            "query": {
+                "operator": "AND",
+                "value": [
+                    {"field": "created_at", "operator": ">", "value": ts_hoje},
+                    {"field": "team_assignee_id", "operator": "=", "value": team_id}
+                ]
+            },
+            "sort": { "field": "created_at", "order": "descending" },
+            "pagination": {"per_page": limit}
+        }
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code == 200:
+            return response.json().get('conversations', [])
+        return []
+    except: return []
+
 # --- INTERFACE ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
 st.markdown("---")
@@ -127,14 +150,17 @@ placeholder = st.empty()
 fuso_br = timezone(timedelta(hours=-3))
 
 with placeholder.container():
+    # Coleta de dados
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
     vol_dia, vol_rec, stats_dia, stats_rec = get_daily_stats(TEAM_ID)
+    ultimas = get_latest_conversations(TEAM_ID, 10) # Recuperando ultimas conversas
     
     online = 0
     tabela = []
     
+    # Processamento da tabela principal
     for mid in ids_time:
         sid = str(mid)
         info = admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
@@ -156,18 +182,84 @@ with placeholder.container():
             "Recente (30m)": f"{stats_rec.get(sid, 0)} {raio}",
             "Pausados": pausados
         })
-        
+    
+    # Cards do Topo
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Fila", len(fila), delta_color="inverse")
-    c2.metric("Volume Hoje", vol_dia)
-    c3.metric("Online", online, f"Meta: {META_AGENTES}")
+    c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
+    c2.metric("Volume (Dia / 30min)", f"{vol_dia} / {vol_rec}") # Trazendo de volta o 30min
+    c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(fuso_br).strftime("%H:%M:%S"))
     
+    # Alerta de Fila com Links
     if len(fila) > 0:
-        st.error("🔥 **CRÍTICO: Fila!**")
+        st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
+        links_md = ""
+        for item in fila:
+            c_id = item['id']
+            link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
+            links_md += f"[Abrir Ticket #{c_id}]({link}) &nbsp;&nbsp; "
+        st.markdown(links_md, unsafe_allow_html=True)
+
+    if online < META_AGENTES:
+        st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta!")
+
+    st.markdown("---")
+
+    # Divisão em duas colunas (Principal e Lateral)
+    c_left, c_right = st.columns([2, 1])
+
+    with c_left:
+        st.subheader("Performance da Equipe")
+        st.dataframe(
+            pd.DataFrame(tabela), 
+            use_container_width=True, 
+            hide_index=True,
+            column_order=["Status", "Agente", "Abertos", "Volume Dia", "Recente (30m)", "Pausados"]
+        )
+
+    with c_right:
+        st.subheader("Últimas Atribuições")
+        hist_dados = []
+        for conv in ultimas:
+            dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
+            hora_fmt = dt_obj.strftime('%H:%M')
+            
+            adm_id = conv.get('admin_assignee_id')
+            nome_agente = "Sem Dono"
+            if adm_id:
+                nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
+            
+            c_id = conv['id']
+            link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
+            
+            hist_dados.append({
+                "Hora": hora_fmt,
+                "Agente": nome_agente,
+                "Link": link
+            })
         
-    st.dataframe(pd.DataFrame(tabela), use_container_width=True, hide_index=True)
+        if hist_dados:
+            st.data_editor(
+                pd.DataFrame(hist_dados),
+                column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
+                hide_index=True,
+                disabled=True,
+                use_container_width=True,
+                key=f"hist_{int(time.time())}" # Key dinâmica pra evitar erro de duplicidade no rerun
+            )
+        else:
+            st.info("Sem conversas hoje.")
+
+    # Legenda (Trazida de volta)
+    st.markdown("---")
+    with st.expander("ℹ️ **Legenda e Regras**"):
+        st.markdown("""
+        * 🟢/🔴 **Status:** Online ou Ausente no Intercom.
+        * ⚠️ **Sobrecarga:** Agente com **5+** tickets abertos.
+        * ⚡ **Alta Demanda:** Agente recebeu **3+** tickets nos últimos 30min.
+        """)
 
 time.sleep(60)
 st.rerun()
+
 
