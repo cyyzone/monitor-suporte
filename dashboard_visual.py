@@ -168,17 +168,15 @@ def get_latest_conversations(team_id, limit=5):
     except:
         return []
 
-# --- NOVAS FUNÇÕES DE CSAT ---
+# --- FUNÇÕES DE CSAT ---
 
 def get_month_start_timestamp():
-    # Retorna o timestamp do dia 1 do mês atual à meia-noite
     fuso_br = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_br)
     primeiro_dia = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     return int(primeiro_dia.timestamp())
 
 def get_csat_stats(team_id, start_timestamp):
-    # Busca conversas com nota a partir de uma data específica
     try:
         url = "https://api.intercom.io/conversations/search"
         payload = {
@@ -187,15 +185,19 @@ def get_csat_stats(team_id, start_timestamp):
                 "value": [
                     {"field": "created_at", "operator": ">", "value": start_timestamp},
                     {"field": "team_assignee_id", "operator": "=", "value": team_id},
-                    # Otimização: Busca só quem tem nota (rating is not null)
                     {"field": "conversation_rating", "operator": "!=", "value": None} 
                 ]
             },
-            "pagination": {"per_page": 150} # Limite por página da API
+            "pagination": {"per_page": 150}
         }
         
         response = requests.post(url, json=payload, headers=headers)
         stats_agente = {}
+        
+        # Acumuladores Globais para retorno rápido
+        global_pos = 0
+        global_neu = 0
+        global_neg = 0
 
         if response.status_code == 200:
             conversas = response.json().get('conversations', [])
@@ -214,17 +216,19 @@ def get_csat_stats(team_id, start_timestamp):
                 
                 stats_agente[admin_id]['total'] += 1
                 
-                # Classificação: 4-5 Positivo, 3 Neutro, 1-2 Negativo
                 if nota >= 4:
                     stats_agente[admin_id]['pos'] += 1
+                    global_pos += 1
                 elif nota == 3:
                     stats_agente[admin_id]['neu'] += 1
+                    global_neu += 1
                 else:
                     stats_agente[admin_id]['neg'] += 1
+                    global_neg += 1
                     
-        return stats_agente
+        return stats_agente, {'pos': global_pos, 'neu': global_neu, 'neg': global_neg}
     except:
-        return {}
+        return {}, {'pos': 0, 'neu': 0, 'neg': 0}
 
 # --- INTERFACE VISUAL ---
 
@@ -240,27 +244,33 @@ with placeholder.container():
     detalhes_admins = get_admin_details()
     fila_detalhada = get_team_queue_details(TEAM_ID)
     
-    # Métricas de Volume
     total_dia_geral, total_recente_geral, dict_stats_dia, dict_stats_30min = get_daily_stats(TEAM_ID, 30)
     
-    # --- NOVAS CHAMADAS DE CSAT ---
-    # Define os timestamps para Dia e Mês
+    # --- CSAT ---
     meia_noite_hoje = int(datetime.now(fuso_br).replace(hour=0, minute=0, second=0).timestamp())
     inicio_mes = get_month_start_timestamp()
 
-    # Busca os dados de CSAT
-    csat_hoje_stats = get_csat_stats(TEAM_ID, meia_noite_hoje)
-    csat_mes_stats = get_csat_stats(TEAM_ID, inicio_mes)
+    # Agora a função retorna também o acumulado do time
+    csat_hoje_stats, time_hoje_stats = get_csat_stats(TEAM_ID, meia_noite_hoje)
+    csat_mes_stats, time_mes_stats = get_csat_stats(TEAM_ID, inicio_mes)
 
-    # Últimas conversas (lateral)
     ultimas_conversas = get_latest_conversations(TEAM_ID, 10)
 
-    # Contadores
     total_fila = len(fila_detalhada)
     agentes_online = 0
-    
     tabela_dados = []
     
+    # --- CÁLCULO DOS KPIs DO TIME (GERAL) ---
+    # Aqui aplicamos a regra: No time, conta tudo (incluindo neutras)
+    def calc_csat_padrao(stats):
+        total = stats['pos'] + stats['neu'] + stats['neg']
+        if total > 0:
+            return (stats['pos'] / total) * 100
+        return 0
+
+    csat_time_hoje = calc_csat_padrao(time_hoje_stats)
+    csat_time_mes = calc_csat_padrao(time_mes_stats)
+
     # Loop principal dos agentes
     for member_id in ids_do_time:
         sid = str(member_id)
@@ -271,38 +281,29 @@ with placeholder.container():
         
         abertos = count_conversations(member_id, 'open')
         pausados = count_conversations(member_id, 'snoozed')
-        
         total_dia = dict_stats_dia.get(sid, 0)
         recente_30 = dict_stats_30min.get(sid, 0)
         
-        # --- CÁLCULO DO CSAT ---
-        # 1. CSAT Dia
+        # --- CÁLCULO DO CSAT AGENTE (REGRA ESPECÍFICA) ---
         dados_h = csat_hoje_stats.get(sid, {'pos':0, 'neu':0, 'neg':0, 'total':0})
         
-        # Padrão (Considera Neutras no Total)
-        if dados_h['total'] > 0:
-            csat_padrao = (dados_h['pos'] / dados_h['total']) * 100
-            txt_csat_padrao = f"{csat_padrao:.0f}%"
-        else:
-            txt_csat_padrao = "-"
-            
-        # Sem Neutras (Ignora nota 3 no denominador)
+        # Regra do Agente: Ignora Neutras (Positivas / (Positivas + Negativas))
         total_valido = dados_h['pos'] + dados_h['neg']
         if total_valido > 0:
-            csat_ajustado = (dados_h['pos'] / total_valido) * 100
-            txt_csat_ajustado = f"{csat_ajustado:.0f}%"
+            nota_agente = (dados_h['pos'] / total_valido) * 100
+            txt_csat_agente = f"{nota_agente:.0f}%"
         else:
-            txt_csat_ajustado = "-"
+            txt_csat_agente = "-"
 
-        # 2. CSAT Mês (Geral Padrão)
-        dados_m = csat_mes_stats.get(sid, {'pos':0, 'total':0})
-        if dados_m['total'] > 0:
-            csat_mes = (dados_m['pos'] / dados_m['total']) * 100
-            txt_csat_mes = f"{csat_mes:.0f}% ({dados_m['total']})"
+        # CSAT Mês do Agente (Também ajustado ou padrão? Vou manter ajustado p/ consistência)
+        dados_m = csat_mes_stats.get(sid, {'pos':0, 'neu':0, 'neg':0, 'total':0})
+        total_valido_m = dados_m['pos'] + dados_m['neg']
+        if total_valido_m > 0:
+            nota_agente_mes = (dados_m['pos'] / total_valido_m) * 100
+            txt_csat_mes = f"{nota_agente_mes:.0f}% ({dados_m['total']})"
         else:
             txt_csat_mes = "-"
 
-        # Alertas Visuais
         alerta_vol = "⚡" if recente_30 >= 3 else "" 
         alerta_abertos = "⚠️" if abertos >= 5 else "" 
 
@@ -311,26 +312,29 @@ with placeholder.container():
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta_abertos}",
             "Total Dia": total_dia,
-            "CSAT Hoje": txt_csat_padrao,
-            "CSAT Hoje (S/N)": txt_csat_ajustado,
-            "CSAT Mês": txt_csat_mes,
+            "CSAT Hoje (Ajustado)": txt_csat_agente, # Nome da coluna alterado
+            "CSAT Mês (Ajustado)": txt_csat_mes,
             "Últimos 30min": f"{recente_30} {alerta_vol}",
             "Pausados": pausados
         })
 
     # --- CARDS DO TOPO ---
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5) # Aumentei pra 5 colunas pra caber o CSAT Time
+    
     with col1:
         st.metric("Fila de Espera", total_fila, "Aguardando", delta_color="inverse")
     with col2:
-        st.metric("Volume (Dia / 30min)", f"{total_dia_geral} / {total_recente_geral}", "Conversas Hoje")
+        st.metric("Volume (Dia)", total_dia_geral, "Tickets")
     with col3:
-        st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
+        # Novo Card: Mostra a saúde do time considerando neutras
+        st.metric("CSAT Time (Dia/Mês)", f"{csat_time_hoje:.0f}% / {csat_time_mes:.0f}%", "Inclui Neutras")
     with col4:
+        st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
+    with col5:
         agora = datetime.now(fuso_br).strftime("%H:%M:%S")
         st.metric("Última Atualização", agora)
 
-    # --- ALERTAS CRITICOS ---
+    # --- ALERTAS ---
     if total_fila > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -341,17 +345,16 @@ with placeholder.container():
         st.markdown(links_md, unsafe_allow_html=True)
     
     if agentes_online < META_AGENTES:
-        st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta! Falta(m) {META_AGENTES - agentes_online} agente(s).")
+        st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta!")
 
     st.markdown("---")
     
-    # --- COLUNAS DE BAIXO ---
+    # --- TABELA PRINCIPAL ---
     c_left, c_right = st.columns([2, 1])
 
     with c_left:
-        st.subheader("Performance da Equipe")
-        # Define a ordem das colunas, incluindo as novas de CSAT
-        cols_order = ["Status", "Agente", "Abertos", "Total Dia", "CSAT Hoje", "CSAT Hoje (S/N)", "CSAT Mês", "Últimos 30min", "Pausados"]
+        st.subheader("Performance Individual")
+        cols_order = ["Status", "Agente", "Abertos", "Total Dia", "CSAT Hoje (Ajustado)", "CSAT Mês (Ajustado)", "Últimos 30min", "Pausados"]
         
         st.dataframe(
             pd.DataFrame(tabela_dados), 
@@ -368,46 +371,28 @@ with placeholder.container():
             hora_fmt = dt_obj.strftime('%H:%M')
             
             adm_id = conv.get('admin_assignee_id')
-            nome_agente = "Sem Dono"
-            if adm_id:
-                nome_agente = detalhes_admins.get(str(adm_id), {}).get('name', 'Desconhecido')
+            nome_agente = detalhes_admins.get(str(adm_id), {}).get('name', 'Sem Dono')
             
             c_id = conv['id']
             link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
             
-            hist_dados.append({
-                "Hora": hora_fmt,
-                "Agente": nome_agente,
-                "Link": link
-            })
+            hist_dados.append({"Hora": hora_fmt, "Agente": nome_agente, "Link": link})
         
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
                 column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
-                hide_index=True,
-                disabled=True,
-                use_container_width=True,
-                key="lista_historico"
+                hide_index=True, disabled=True, use_container_width=True, key="lista_historico"
             )
         else:
             st.info("Nenhuma conversa hoje.")
 
-    # --- LEGENDA ATUALIZADA ---
     st.markdown("---")
-    with st.expander("ℹ️ **Legenda e Métricas** (Clique para expandir)"):
+    with st.expander("ℹ️ **Legenda CSAT**"):
         st.markdown("""
-        #### **Status e Alertas**
-        * 🟢/🔴 **Status:** Indica se o agente está Online ou em modo "Away".
-        * ⚠️ **Sobrecarga:** 5 ou mais tickets abertos.
-        * ⚡ **Alta Demanda:** 3 ou mais tickets novos em 30min.
-
-        #### **Cálculo de CSAT (Satisfação)**
-        * **CSAT Hoje:** `Positivas / Total de Avaliações`. Considera notas 3 (Neutro) no cálculo, o que pode baixar a nota.
-        * **CSAT Hoje (S/N):** `Positivas / (Positivas + Negativas)`. Ignora os neutros. Foca na polarização (Feliz vs Triste).
-        * **CSAT Mês:** Visão consolidada do mês atual (Padrão). Entre parênteses está o nº total de avaliações.
+        * **CSAT Agente (Ajustado):** Ignora avaliações Neutras (3). Fórmula: `Positivas / (Positivas + Negativas)`.
+        * **CSAT Time (Geral):** Considera avaliações Neutras. Fórmula: `Positivas / Total de Avaliações`.
         """)
 
 time.sleep(60)
 st.rerun()
-
