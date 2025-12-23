@@ -34,11 +34,6 @@ Focado na **análise**. Processa o histórico completo do mês atual, buscando t
 
 ```bash
 pip install -r requirements.txt
-
-### 1. Instalar Dependências
-
-```bash
-pip install -r requirements.txt
 ```
 ### 2. Configurar as Credenciais (Secrets)
 
