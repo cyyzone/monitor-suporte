@@ -252,14 +252,24 @@ with placeholder.container():
 
     # Legenda (Trazida de volta)
     st.markdown("---")
-    with st.expander("ℹ️ **Legenda e Regras**"):
+    with st.expander("ℹ️ **Legenda e Sugestões de Ação**"):
         st.markdown("""
-        * 🟢/🔴 **Status:** Online ou Ausente no Intercom.
-        * ⚠️ **Sobrecarga:** Agente com **5+** tickets abertos.
-        * ⚡ **Alta Demanda:** Agente recebeu **3+** tickets nos últimos 30min.
+        #### **Status do Agente**
+        * 🟢 **Online:** Agente ativo e disponível.
+        * 🔴 **Ausente:** Agente em modo "Away".
+
+        #### **Alertas e Sugestões**
+        * ⚠️ **Sobrecarga (Triângulo):**
+            * *Ocorre quando:* Agente tem **5 ou mais** tickets abertos.
+            * *Sugestão:* **Verificar se o agente precisa de ajuda para finalizar os atendimentos.**
+        
+        * ⚡ **Alta Demanda (Raio):**
+            * *Ocorre quando:* Agente recebeu **3 ou mais** tickets nos últimos 30min.
+            * *Sugestão:* **O agente está recebendo uma rajada de tickets. Avaliar pausar a distribuição ou alocar reforço.**
         """)
 
 time.sleep(60)
 st.rerun()
+
 
 
