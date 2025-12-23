@@ -100,9 +100,10 @@ def get_daily_stats(team_id, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
         
-        # Define o inicio do dia (UTC)
-        hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        ts_hoje = int(hoje.timestamp())
+        # Define o fuso BR
+        fuso_br = timezone(timedelta(hours=-3))
+        # Pega a meia-noite do Brasil
+        hoje = datetime.now(fuso_br).replace(hour=0, minute=0, second=0, microsecond=0)
         
         # Define o corte de 30 minutos atras
         agora_timestamp = int(time.time())
@@ -296,6 +297,7 @@ with placeholder.container():
 # Pausa e recarrega a página inteira
 time.sleep(60)
 st.rerun()
+
 
 
 
