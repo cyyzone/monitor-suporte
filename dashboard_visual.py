@@ -15,7 +15,7 @@ st.set_page_config(
 TOKEN = st.secrets["INTERCOM_TOKEN"]
 APP_ID = st.secrets["INTERCOM_APP_ID"]
 TEAM_ID = 2975006
-META_AGENTES = 4 
+META_AGENTES = 4
 
 headers = {
     "Authorization": f"Bearer {TOKEN}",
@@ -38,7 +38,7 @@ def get_admin_details():
                 }
         return dados
     except:
-        return {} 
+        return {}
 
 def get_team_members(team_id):
     try:
@@ -80,7 +80,7 @@ def get_team_queue_details(team_id):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 60} 
+            "pagination": {"per_page": 60}
         }
         response = requests.post(url, json=payload, headers=headers)
         detalhes_fila = []
@@ -96,7 +96,6 @@ def get_team_queue_details(team_id):
         return []
 
 # --- NOVA FUNÇÃO OTIMIZADA ---
-# Busca tudo de hoje e separa o que é do DIA e o que é RECENTE (30min)
 def get_daily_stats(team_id, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
@@ -117,7 +116,7 @@ def get_daily_stats(team_id, minutos_recente=30):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 150} # Pega bastante pra garantir o dia todo
+            "pagination": {"per_page": 150}
         }
         
         response = requests.post(url, json=payload, headers=headers)
@@ -159,7 +158,7 @@ def get_latest_conversations(team_id, limit=5):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "sort": { "field": "created_at", "order": "descending" }, 
+            "sort": { "field": "created_at", "order": "descending" },
             "pagination": {"per_page": limit}
         }
         response = requests.post(url, json=payload, headers=headers)
@@ -215,8 +214,8 @@ with placeholder.container():
             "Status": status_emoji,
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta_abertos}",
-            "Total Dia": total_dia,          # Nova Coluna
-            "Últimos 30min": f"{recente_30} {alerta_vol}", # Coluna Atualizada
+            "Total Dia": total_dia,
+            "Últimos 30min": f"{recente_30} {alerta_vol}",
             "Pausados": pausados
         })
 
@@ -258,7 +257,7 @@ with placeholder.container():
             pd.DataFrame(tabela_dados), 
             use_container_width=True, 
             hide_index=True,
-            column_order=["Status", "Agente", "Abertos", "Total Dia", "Últimos 30min", "Pausados"] # Ordem bonitinha
+            column_order=["Status", "Agente", "Abertos", "Total Dia", "Últimos 30min", "Pausados"]
         )
 
     with c_right:
@@ -285,17 +284,16 @@ with placeholder.container():
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
-                column_config={
-                    "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")
-                },
+                column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
                 hide_index=True,
                 disabled=True,
                 use_container_width=True,
-                key="lista_historico" # <--- ADICIONE ESTA LINHA (com a vírgula antes)
+                key="lista_historico" # O RG da tabela que evita o erro de duplicação
             )
         else:
             st.info("Nenhuma conversa hoje.")
 
+# Pausa e recarrega a página inteira
 time.sleep(60)
 st.rerun()
 
