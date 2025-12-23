@@ -95,7 +95,7 @@ def get_team_queue_details(team_id):
     except:
         return []
 
-# --- NOVA FUNÇÃO OTIMIZADA (Corrigida) ---
+# --- NOVA FUNÇÃO OTIMIZADA ---
 def get_daily_stats(team_id, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
@@ -120,7 +120,7 @@ def get_daily_stats(team_id, minutos_recente=30):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "sort": { "field": "created_at", "order": "descending" }, # Importante: Ordenar ajuda a API
+            "sort": { "field": "created_at", "order": "descending" }, 
             "pagination": {"per_page": 150}
         }
         
@@ -133,7 +133,7 @@ def get_daily_stats(team_id, minutos_recente=30):
         
         if response.status_code == 200:
             conversas = response.json().get('conversations', [])
-            total_dia_geral = len(conversas) # Total que a API retornou
+            total_dia_geral = len(conversas)
             
             for conv in conversas:
                 admin_id = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
@@ -151,7 +151,7 @@ def get_daily_stats(team_id, minutos_recente=30):
     except:
         return 0, 0, {}, {}
 
-def get_latest_conversations(team_id, limit=5):
+def get_latest_conversations(team_id, limit=10):
     try:
         fuso_br = timezone(timedelta(hours=-3))
         hoje = datetime.now(fuso_br).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -193,7 +193,7 @@ with placeholder.container():
     # Chama a função otimizada
     total_dia_geral, total_recente_geral, dict_stats_dia, dict_stats_30min = get_daily_stats(TEAM_ID, 30)
     
-    ultimas_conversas = get_latest_conversations(TEAM_ID, 5)
+    ultimas_conversas = get_latest_conversations(TEAM_ID, 10)
 
     # Contadores Gerais
     total_fila = len(fila_detalhada)
@@ -233,7 +233,6 @@ with placeholder.container():
     with col1:
         st.metric("Fila de Espera", total_fila, "Aguardando", delta_color="inverse")
     with col2:
-        # Aqui mostramos o Total do Dia e o Recente juntos
         st.metric("Volume (Dia / 30min)", f"{total_dia_geral} / {total_recente_geral}", "Conversas Hoje")
     with col3:
         st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
@@ -301,6 +300,25 @@ with placeholder.container():
         else:
             st.info("Nenhuma conversa hoje.")
 
+    # --- LEGENDA (AQUI ESTÁ A NOVIDADE) ---
+    st.markdown("---")
+    with st.expander("ℹ️ **Legenda e Regras do Painel** (Clique para expandir)"):
+        st.markdown("""
+        #### **Status do Agente**
+        * 🟢 **Online:** Agente ativo no Intercom.
+        * 🔴 **Ausente:** Agente ativou o modo "Ausente" (Away).
+
+        #### **Ícones de Alerta**
+        * ⚠️ **Sobrecarga (Triângulo):**
+            * Indica que o agente tem **5 ou mais** tickets "Abertos" na caixa dele.
+            * *Sugestão: Verificar se precisa de ajuda para finalizar.*
+        
+        * ⚡ **Alta Demanda (Raio):**
+            * Indica que o agente recebeu **3 ou mais** novos tickets nos últimos **30 minutos**.
+            * *Sugestão: O agente está recebendo uma rajada de atendimentos agora.*
+        """)
+
 # Recarrega a página a cada 60s
 time.sleep(60)
 st.rerun()
+
