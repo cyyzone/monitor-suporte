@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # --- CONFIGURAÇÕES DA PÁGINA ---
 # config basica da pagina, titulo e icone pra ficar bonito
@@ -305,3 +305,4 @@ while True:
 
 
         time.sleep(60) # espera 1 minuto e roda tudo de novo
+
