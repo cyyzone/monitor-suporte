@@ -95,19 +95,22 @@ def get_team_queue_details(team_id):
     except:
         return []
 
-# --- NOVA FUNÇÃO OTIMIZADA ---
+# --- NOVA FUNÇÃO OTIMIZADA (Corrigida) ---
 def get_daily_stats(team_id, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
         
-        # Define o fuso BR
+        # Define fuso Brasil (-3)
         fuso_br = timezone(timedelta(hours=-3))
-        # Pega a meia-noite do Brasil
-        hoje = datetime.now(fuso_br).replace(hour=0, minute=0, second=0, microsecond=0)
+        # Pega agora no Brasil
+        agora_br = datetime.now(fuso_br)
+        # Zera as horas para pegar meia-noite de hoje
+        meia_noite_br = agora_br.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Converte para timestamp (o Intercom entende isso automaticamente como UTC)
+        ts_hoje = int(meia_noite_br.timestamp())
         
-        # Define o corte de 30 minutos atras
-        agora_timestamp = int(time.time())
-        ts_corte_30min = agora_timestamp - (minutos_recente * 60)
+        # Para os 30 minutos, usamos o timestamp atual UTC direto
+        ts_corte_30min = int(time.time()) - (minutos_recente * 60)
 
         payload = {
             "query": {
@@ -117,6 +120,7 @@ def get_daily_stats(team_id, minutos_recente=30):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
+            "sort": { "field": "created_at", "order": "descending" }, # Importante: Ordenar ajuda a API
             "pagination": {"per_page": 150}
         }
         
@@ -124,10 +128,12 @@ def get_daily_stats(team_id, minutos_recente=30):
         
         stats_dia = {}
         stats_30min = {}
+        total_dia_geral = 0
         total_recente_geral = 0
         
         if response.status_code == 200:
             conversas = response.json().get('conversations', [])
+            total_dia_geral = len(conversas) # Total que a API retornou
             
             for conv in conversas:
                 admin_id = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
@@ -141,13 +147,14 @@ def get_daily_stats(team_id, minutos_recente=30):
                     stats_30min[admin_id] = stats_30min.get(admin_id, 0) + 1
                     total_recente_geral += 1
                     
-        return total_recente_geral, stats_dia, stats_30min
+        return total_dia_geral, total_recente_geral, stats_dia, stats_30min
     except:
-        return 0, {}, {}
+        return 0, 0, {}, {}
 
 def get_latest_conversations(team_id, limit=5):
     try:
-        hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        fuso_br = timezone(timedelta(hours=-3))
+        hoje = datetime.now(fuso_br).replace(hour=0, minute=0, second=0, microsecond=0)
         ts_hoje = int(hoje.timestamp())
 
         url = "https://api.intercom.io/conversations/search"
@@ -183,8 +190,8 @@ with placeholder.container():
     detalhes_admins = get_admin_details()
     fila_detalhada = get_team_queue_details(TEAM_ID)
     
-    # Chama a função nova que traz os dois dados
-    total_entrada_30m, dict_stats_dia, dict_stats_30min = get_daily_stats(TEAM_ID, 30)
+    # Chama a função otimizada
+    total_dia_geral, total_recente_geral, dict_stats_dia, dict_stats_30min = get_daily_stats(TEAM_ID, 30)
     
     ultimas_conversas = get_latest_conversations(TEAM_ID, 5)
 
@@ -226,7 +233,8 @@ with placeholder.container():
     with col1:
         st.metric("Fila de Espera", total_fila, "Aguardando", delta_color="inverse")
     with col2:
-        st.metric("Volume (30min)", total_entrada_30m, "Novos Tickets")
+        # Aqui mostramos o Total do Dia e o Recente juntos
+        st.metric("Volume (Dia / 30min)", f"{total_dia_geral} / {total_recente_geral}", "Conversas Hoje")
     with col3:
         st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
     with col4:
@@ -253,7 +261,6 @@ with placeholder.container():
 
     with c_left:
         st.subheader("Performance da Equipe")
-        # Mostra a tabela com as novas colunas
         st.dataframe(
             pd.DataFrame(tabela_dados), 
             use_container_width=True, 
@@ -289,15 +296,11 @@ with placeholder.container():
                 hide_index=True,
                 disabled=True,
                 use_container_width=True,
-                key="lista_historico" # O RG da tabela que evita o erro de duplicação
+                key="lista_historico"
             )
         else:
             st.info("Nenhuma conversa hoje.")
 
-# Pausa e recarrega a página inteira
+# Recarrega a página a cada 60s
 time.sleep(60)
 st.rerun()
-
-
-
-
