@@ -8,7 +8,7 @@ O objetivo é fornecer visibilidade imediata sobre a fila e produtividade, além
 
 O sistema foi separado em dois dashboards para garantir performance e foco:
 
-### 1. 🚀 Dashboard Operacional (`dashboard_operacional.py`)
+### 1. 🚀 Dashboard Operacional (`dashboard_visual.py`)
 Focado na **velocidade**. É leve e atualiza automaticamente a cada 60 segundos. Ideal para ficar na TV da sala.
 * **Monitoramento de Fila:** Alerta visual crítico para clientes aguardando atendimento.
 * **Status em Tempo Real:** Quem está Online vs. Ausente (Away).
