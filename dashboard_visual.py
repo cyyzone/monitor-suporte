@@ -231,7 +231,8 @@ while True:
             delta_agentes = agentes_online - META_AGENTES
             st.metric(label="Agentes Online", value=agentes_online, delta=f"Meta: {META_AGENTES}", delta_color="normal")
         with col4:
-            agora = datetime.now().strftime("%H:%M:%S")
+            fuso_br = timezone(timedelta(hours=-3))
+            agora = datetime.now(fuso_br).strftime("%H:%M:%S")
             st.metric(label="Última Atualização", value=agora)
 
         # --- ÁREA DE ALERTAS E LINKS DA FILA ---
@@ -301,5 +302,6 @@ while True:
                 )
             else:
                 st.info("Nenhuma conversa hoje.")
+
 
         time.sleep(60) # espera 1 minuto e roda tudo de novo
