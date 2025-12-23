@@ -265,11 +265,12 @@ with placeholder.container():
         
         * ⚡ **Alta Demanda (Raio):**
             * *Ocorre quando:* Agente recebeu **3 ou mais** tickets nos últimos 30min.
-            * *Sugestão:* **O agente está recebendo uma rajada de tickets. Avaliar pausar a distribuição ou alocar reforço.**
+            * *Sugestão:* **O agente está recebendo uma rajada de tickets. Avaliar se estamos com algum erro, como por exemplo queda na exportação ou se seá necessário solicitar reforço no chat.**
         """)
 
 time.sleep(60)
 st.rerun()
+
 
 
 
