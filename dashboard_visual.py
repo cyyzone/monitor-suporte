@@ -268,7 +268,7 @@ with placeholder.container():
     meia_noite_hoje = int(datetime.now(fuso_br).replace(hour=0, minute=0, second=0).timestamp())
     inicio_mes = get_month_start_timestamp()
 
-    # Agora a função retorna também o acumulado do time
+    # Buscando dados (com limite de 10 páginas para pegar tudo)
     csat_hoje_stats, time_hoje_stats = get_csat_stats(TEAM_ID, meia_noite_hoje)
     csat_mes_stats, time_mes_stats = get_csat_stats(TEAM_ID, inicio_mes)
 
@@ -304,11 +304,12 @@ with placeholder.container():
         # --- CÁLCULO DO CSAT AGENTE ---
         dados_h = csat_hoje_stats.get(sid, {'pos':0, 'neu':0, 'neg':0, 'total':0})
         
-        # Regra do Agente: Ignora Neutras (Positivas / (Positivas + Negativas))
+        # Regra do Agente: Ignora Neutras
         total_valido = dados_h['pos'] + dados_h['neg']
         if total_valido > 0:
             nota_agente = (dados_h['pos'] / total_valido) * 100
-            txt_csat_agente = f"{nota_agente:.0f}%"
+            # MUDANÇA AQUI: .1f para uma casa decimal
+            txt_csat_agente = f"{nota_agente:.1f}%" 
         else:
             txt_csat_agente = "-"
 
@@ -317,7 +318,8 @@ with placeholder.container():
         total_valido_m = dados_m['pos'] + dados_m['neg']
         if total_valido_m > 0:
             nota_agente_mes = (dados_m['pos'] / total_valido_m) * 100
-            txt_csat_mes = f"{nota_agente_mes:.0f}% ({dados_m['total']})"
+            # MUDANÇA AQUI: .1f para uma casa decimal
+            txt_csat_mes = f"{nota_agente_mes:.1f}% ({dados_m['total']})"
         else:
             txt_csat_mes = "-"
 
@@ -343,7 +345,8 @@ with placeholder.container():
     with col2:
         st.metric("Volume (Dia)", total_dia_geral, "Tickets")
     with col3:
-        st.metric("CSAT Time (Dia/Mês)", f"{csat_time_hoje:.0f}% / {csat_time_mes:.0f}%", "Inclui Neutras")
+        # MUDANÇA AQUI: .1f para mostrar 97.6%
+        st.metric("CSAT Time (Dia/Mês)", f"{csat_time_hoje:.1f}% / {csat_time_mes:.1f}%", "Inclui Neutras")
     with col4:
         st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
     with col5:
@@ -404,7 +407,7 @@ with placeholder.container():
             st.info("Nenhuma conversa hoje.")
 
     st.markdown("---")
-    # --- LEGENDA UNIFICADA (CORRIGIDO) ---
+    # --- LEGENDA UNIFICADA ---
     with st.expander("ℹ️ **Legenda Completa** (Clique para expandir)"):
         st.markdown("""
         #### **Status e Ícones**
