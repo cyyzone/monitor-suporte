@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone, timedelta
 
 # --- CONFIGURAÇÕES DA PÁGINA ---
-# config basica da pagina, titulo e icone pra ficar bonito
 st.set_page_config(
     page_title="Monitor Intercom",
     page_icon="📊",
@@ -13,13 +12,11 @@ st.set_page_config(
 )
 
 # --- CONFIGURAÇÕES ---
-# pegando as senhas do arquivo de segredos pra nao vazar nada
 TOKEN = st.secrets["INTERCOM_TOKEN"]
 APP_ID = st.secrets["INTERCOM_APP_ID"]
 TEAM_ID = 2975006
-META_AGENTES = 4 # meta de quantos tem q ta online
+META_AGENTES = 4 
 
-# cabecalho padrao pra bater na api do intercom
 headers = {
     "Authorization": f"Bearer {TOKEN}",
     "Accept": "application/json",
@@ -28,7 +25,6 @@ headers = {
 
 # --- FUNÇÕES ---
 
-# busca quem sao os admins e se tao online ou no modo ausente
 def get_admin_details():
     try:
         url = "https://api.intercom.io/admins"
@@ -42,9 +38,8 @@ def get_admin_details():
                 }
         return dados
     except:
-        return {} # se der erro retorna vazio pra nao quebrar
+        return {} 
 
-# pega so quem faz parte do time de suporte pelo ID da equipe
 def get_team_members(team_id):
     try:
         url = f"https://api.intercom.io/teams/{team_id}"
@@ -55,7 +50,6 @@ def get_team_members(team_id):
     except:
         return []
 
-# conta quantos tickets o caboclo tem na mao (aberto ou pausado)
 def count_conversations(admin_id, state):
     try:
         url = "https://api.intercom.io/conversations/search"
@@ -75,14 +69,9 @@ def count_conversations(admin_id, state):
     except:
         return 0
 
-# Modificada para retornar uma lista de objetos (ID e Data) em vez de apenas IDs
-# --- SUBSTITUA APENAS ESSA FUNÇÃO ---
-# essa funcao busca a fila... trago tudo que ta aberto no time
-# e filtro aqui no python quem nao tem dono, eh mais garantido
 def get_team_queue_details(team_id):
     try:
         url = "https://api.intercom.io/conversations/search"
-        # Removemos o filtro de 'admin_assignee_id' do payload para garantir que a API traga tudo
         payload = {
             "query": {
                 "operator": "AND",
@@ -91,13 +80,12 @@ def get_team_queue_details(team_id):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 60} # aumentei pra garantir q pega a lista toda
+            "pagination": {"per_page": 60} 
         }
         response = requests.post(url, json=payload, headers=headers)
         detalhes_fila = []
         if response.status_code == 200:
             for conv in response.json().get('conversations', []):
-                # filtragem acontece AQUI, se nao tiver ID de admin, ta na fila
                 if conv.get('admin_assignee_id') is None:
                     detalhes_fila.append({
                         'id': conv['id'],
@@ -107,43 +95,58 @@ def get_team_queue_details(team_id):
     except:
         return []
 
-# ve a distribuicao recente pra ver quem ta pegando mto ticket
-# ajuda a ver quem ta sobrecarregado nos ultimos minutos
-def get_recent_distribution(team_id, minutos=30):
+# --- NOVA FUNÇÃO OTIMIZADA ---
+# Busca tudo de hoje e separa o que é do DIA e o que é RECENTE (30min)
+def get_daily_stats(team_id, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
-        agora_timestamp = int(time.time())
-        tempo_corte = agora_timestamp - (minutos * 60)
         
+        # Define o inicio do dia (UTC)
+        hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        ts_hoje = int(hoje.timestamp())
+        
+        # Define o corte de 30 minutos atras
+        agora_timestamp = int(time.time())
+        ts_corte_30min = agora_timestamp - (minutos_recente * 60)
+
         payload = {
             "query": {
                 "operator": "AND",
                 "value": [
-                    {"field": "created_at", "operator": ">", "value": tempo_corte},
+                    {"field": "created_at", "operator": ">", "value": ts_hoje},
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 60}
+            "pagination": {"per_page": 150} # Pega bastante pra garantir o dia todo
         }
+        
         response = requests.post(url, json=payload, headers=headers)
-        distribuicao = {}
-        total_recente = 0
+        
+        stats_dia = {}
+        stats_30min = {}
+        total_recente_geral = 0
+        
         if response.status_code == 200:
             conversas = response.json().get('conversations', [])
-            total_recente = len(conversas)
+            
             for conv in conversas:
-                admin_id = conv.get('admin_assignee_id')
-                key = str(admin_id) if admin_id is not None else "FILA"
-                distribuicao[key] = distribuicao.get(key, 0) + 1
-        return total_recente, distribuicao
+                admin_id = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
+                ts_conv = conv['created_at']
+                
+                # 1. Contabiliza para o Total do Dia
+                stats_dia[admin_id] = stats_dia.get(admin_id, 0) + 1
+                
+                # 2. Verifica se é dos últimos 30 min
+                if ts_conv > ts_corte_30min:
+                    stats_30min[admin_id] = stats_30min.get(admin_id, 0) + 1
+                    total_recente_geral += 1
+                    
+        return total_recente_geral, stats_dia, stats_30min
     except:
-        return 0, {}
+        return 0, {}, {}
 
-# --- NOVA FUNÇÃO: Busca as últimas conversas do dia para mostrar atribuição ---
-# pega as ultimas 5 que entraram hoje pra montar o historico ali do lado
 def get_latest_conversations(team_id, limit=5):
     try:
-        # Pega timestamp do início do dia de hoje (UTC)
         hoje = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         ts_hoje = int(hoje.timestamp())
 
@@ -156,7 +159,7 @@ def get_latest_conversations(team_id, limit=5):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "sort": { "field": "created_at", "order": "descending" }, # ordem decrescente, do novo pro velho
+            "sort": { "field": "created_at", "order": "descending" }, 
             "pagination": {"per_page": limit}
         }
         response = requests.post(url, json=payload, headers=headers)
@@ -172,140 +175,123 @@ st.title("📊 Monitoramento de Suporte - CS")
 st.markdown("---")
 
 placeholder = st.empty()
+fuso_br = timezone(timedelta(hours=-3))
 
-# loop infinito pra ficar atualizando a tela sozinho
-while True:
-    with placeholder.container():
-        # 1. Coleta de Dados - chama todas as funcoes la de cima
-        ids_do_time = get_team_members(TEAM_ID)
-        detalhes_admins = get_admin_details()
-        
-        # busca os dados da fila com id e data
-        fila_detalhada = get_team_queue_details(TEAM_ID)
-        
-        total_entrada_30m, stats_distribuicao = get_recent_distribution(TEAM_ID, 30)
-        
-        # busca historico recente
-        ultimas_conversas = get_latest_conversations(TEAM_ID, 5)
+with placeholder.container():
+    # 1. Coleta de Dados
+    ids_do_time = get_team_members(TEAM_ID)
+    detalhes_admins = get_admin_details()
+    fila_detalhada = get_team_queue_details(TEAM_ID)
+    
+    # Chama a função nova que traz os dois dados
+    total_entrada_30m, dict_stats_dia, dict_stats_30min = get_daily_stats(TEAM_ID, 30)
+    
+    ultimas_conversas = get_latest_conversations(TEAM_ID, 5)
 
-        # contadores gerais
-        total_fila = len(fila_detalhada)
-        agentes_online = 0
+    # Contadores Gerais
+    total_fila = len(fila_detalhada)
+    agentes_online = 0
+    
+    tabela_dados = []
+    
+    for member_id in ids_do_time:
+        sid = str(member_id)
+        info = detalhes_admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
         
-        # prepara a lista pra tabela principal
-        tabela_dados = []
+        status_emoji = "🔴 Ausente" if info['is_away'] else "🟢 Online"
+        if not info['is_away']: agentes_online += 1
         
-        for member_id in ids_do_time:
-            sid = str(member_id)
-            # se nao achar o nome, poe o id mesmo
-            info = detalhes_admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
-            
-            status_emoji = "🔴 Ausente" if info['is_away'] else "🟢 Online"
-            if not info['is_away']: agentes_online += 1
-            
-            abertos = count_conversations(member_id, 'open')
-            pausados = count_conversations(member_id, 'snoozed')
-            entrada_recente = stats_distribuicao.get(sid, 0)
-            
-            # logica dos alertas: muito volume ou muito ticket aberto
-            alerta_vol = "⚡" if entrada_recente >= 3 else ""
-            alerta_abertos = "⚠️" if abertos >= 5 else ""
+        abertos = count_conversations(member_id, 'open')
+        pausados = count_conversations(member_id, 'snoozed')
+        
+        # Pega os dados calculados
+        total_dia = dict_stats_dia.get(sid, 0)
+        recente_30 = dict_stats_30min.get(sid, 0)
+        
+        alerta_vol = "⚡" if recente_30 >= 3 else ""
+        alerta_abertos = "⚠️" if abertos >= 5 else ""
 
-            tabela_dados.append({
-                "Status": status_emoji,
-                "Agente": info['name'],
-                "Abertos": f"{abertos} {alerta_abertos}",
-                "Entrada (últimos 30min)": f"{entrada_recente} {alerta_vol}",
-                "Pausados": pausados
+        tabela_dados.append({
+            "Status": status_emoji,
+            "Agente": info['name'],
+            "Abertos": f"{abertos} {alerta_abertos}",
+            "Total Dia": total_dia,          # Nova Coluna
+            "Últimos 30min": f"{recente_30} {alerta_vol}", # Coluna Atualizada
+            "Pausados": pausados
+        })
+
+    # --- LAYOUT SUPERIOR ---
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Fila de Espera", total_fila, "Aguardando", delta_color="inverse")
+    with col2:
+        st.metric("Volume (30min)", total_entrada_30m, "Novos Tickets")
+    with col3:
+        st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
+    with col4:
+        agora = datetime.now(fuso_br).strftime("%H:%M:%S")
+        st.metric("Última Atualização", agora)
+
+    # --- ALERTAS ---
+    if total_fila > 0:
+        st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
+        links_md = ""
+        for item in fila_detalhada:
+            c_id = item['id']
+            link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
+            links_md += f"[Abrir Ticket #{c_id}]({link}) &nbsp;&nbsp; "
+        st.markdown(links_md, unsafe_allow_html=True)
+    
+    if agentes_online < META_AGENTES:
+        st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta! Falta(m) {META_AGENTES - agentes_online} agente(s).")
+
+    st.markdown("---")
+    
+    # --- COLUNAS ---
+    c_left, c_right = st.columns([2, 1])
+
+    with c_left:
+        st.subheader("Performance da Equipe")
+        # Mostra a tabela com as novas colunas
+        st.dataframe(
+            pd.DataFrame(tabela_dados), 
+            use_container_width=True, 
+            hide_index=True,
+            column_order=["Status", "Agente", "Abertos", "Total Dia", "Últimos 30min", "Pausados"] # Ordem bonitinha
+        )
+
+    with c_right:
+        st.subheader("Últimas Atribuições")
+        hist_dados = []
+        for conv in ultimas_conversas:
+            dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
+            hora_fmt = dt_obj.strftime('%H:%M')
+            
+            adm_id = conv.get('admin_assignee_id')
+            nome_agente = "Sem Dono"
+            if adm_id:
+                nome_agente = detalhes_admins.get(str(adm_id), {}).get('name', 'Desconhecido')
+            
+            c_id = conv['id']
+            link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
+            
+            hist_dados.append({
+                "Hora": hora_fmt,
+                "Agente": nome_agente,
+                "Link": link
             })
-
-        # --- LAYOUT SUPERIOR (CARDS) ---
-        # divide a tela em 4 colunas pros numeros grandes
-        col1, col2, col3, col4 = st.columns(4)
         
-        with col1:
-            st.metric(label="Fila de Espera", value=total_fila, delta="Aguardando", delta_color="inverse")
-        with col2:
-            st.metric(label="Volume (30min)", value=total_entrada_30m, delta="Novos Tickets")
-        with col3:
-            delta_agentes = agentes_online - META_AGENTES
-            st.metric(label="Agentes Online", value=agentes_online, delta=f"Meta: {META_AGENTES}", delta_color="normal")
-        with col4:
-            fuso_br = timezone(timedelta(hours=-3))
-            agora = datetime.now(fuso_br).strftime("%H:%M:%S")
-            st.metric(label="Última Atualização", value=agora)
+        if hist_dados:
+            st.data_editor(
+                pd.DataFrame(hist_dados),
+                column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
+                hide_index=True, disabled=True, use_container_width=True
+            )
+        else:
+            st.info("Nenhuma conversa hoje.")
 
-        # --- ÁREA DE ALERTAS E LINKS DA FILA ---
-        # se tiver fila, mostra o erro vermelho e cria os links pra clicar
-        if total_fila > 0:
-            st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
-            
-            links_md = ""
-            for item in fila_detalhada:
-                c_id = item['id']
-                # monta o link pra ir direto pro ticket
-                link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
-                links_md += f"[Abrir Ticket #{c_id}]({link}) &nbsp;&nbsp; "
-            
-            st.markdown(links_md, unsafe_allow_html=True)
-        
-        # aviso se tiver pouca gente online
-        if agentes_online < META_AGENTES:
-            st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta! Falta(m) {META_AGENTES - agentes_online} agente(s).")
-
-        st.markdown("---")
-        
-        # --- COLUNAS: PERFORMANCE vs HISTÓRICO ---
-        c_left, c_right = st.columns([2, 1])
-
-        with c_left:
-            st.subheader("Performance da Equipe")
-            df = pd.DataFrame(tabela_dados)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-        with c_right:
-            st.subheader("Últimas Atribuições")
-            hist_dados = []
-            for conv in ultimas_conversas:
-                # arruma a hora pra ficar legivel
-                dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
-                hora_fmt = dt_obj.strftime('%H:%M')
-                
-                # tenta achar o nome do agente, se nao tiver eh sem dono
-                adm_id = conv.get('admin_assignee_id')
-                nome_agente = "Sem Dono"
-                if adm_id:
-                    nome_agente = detalhes_admins.get(str(adm_id), {}).get('name', 'Desconhecido')
-                
-                # Link
-                c_id = conv['id']
-                link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
-                
-                hist_dados.append({
-                    "Hora": hora_fmt,
-                    "Agente": nome_agente,
-                    "Link": link  # coluninha pro link funcionar
-                })
-            
-            if hist_dados:
-                df_hist = pd.DataFrame(hist_dados)
-                
-                # exibe tabela com o botao de link configurado
-                st.data_editor(
-                    df_hist,
-                    column_config={
-                        "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")
-                    },
-                    hide_index=True,
-                    disabled=True, # so leitura, ninguem edita nada
-                    use_container_width=True
-                )
-            else:
-                st.info("Nenhuma conversa hoje.")
-
-
-        # Pausa 60 segundos e REINICIA o script do zero (limpa a memória)
-        time.sleep(60)
-        st.rerun()
+time.sleep(60)
+st.rerun()
 
 
