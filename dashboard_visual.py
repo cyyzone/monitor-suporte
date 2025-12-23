@@ -168,7 +168,7 @@ def get_latest_conversations(team_id, limit=5):
     except:
         return []
 
-# --- FUNÇÕES DE CSAT ---
+# --- FUNÇÕES DE CSAT (CORRIGIDA) ---
 
 def get_month_start_timestamp():
     fuso_br = timezone(timedelta(hours=-3))
@@ -184,50 +184,68 @@ def get_csat_stats(team_id, start_timestamp):
                 "operator": "AND",
                 "value": [
                     {"field": "created_at", "operator": ">", "value": start_timestamp},
-                    {"field": "team_assignee_id", "operator": "=", "value": team_id},
-                    {"field": "conversation_rating", "operator": "!=", "value": None} 
+                    {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
             "pagination": {"per_page": 150}
         }
         
-        response = requests.post(url, json=payload, headers=headers)
-        stats_agente = {}
+        conversas_totais = []
         
-        # Acumuladores Globais para retorno rápido
+        # Aumentei o range para 10 (10 x 150 = 1500 conversas de limite)
+        # Isso cobre seus 835 tickets com folga.
+        for _ in range(10):
+            response = requests.post(url, json=payload, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                lista = data.get('conversations', [])
+                conversas_totais.extend(lista)
+                
+                # Verifica se tem próxima página
+                pages = data.get('pages', {})
+                next_page = pages.get('next')
+                if next_page:
+                    payload['pagination']['starting_after'] = next_page.get('starting_after')
+                else:
+                    break # Acabaram as páginas antes do limite de 10
+            else:
+                break
+        
+        stats_agente = {}
         global_pos = 0
         global_neu = 0
         global_neg = 0
 
-        if response.status_code == 200:
-            conversas = response.json().get('conversations', [])
+        for conv in conversas_totais:
+            admin_id = str(conv.get('admin_assignee_id'))
+            if not admin_id: continue 
             
-            for conv in conversas:
-                admin_id = str(conv.get('admin_assignee_id'))
-                if not admin_id: continue 
-                
-                rating_obj = conv.get('conversation_rating', {})
-                if not rating_obj: continue 
-                
-                nota = rating_obj.get('rating')
-                
-                if admin_id not in stats_agente:
-                    stats_agente[admin_id] = {'pos': 0, 'neu': 0, 'neg': 0, 'total': 0}
-                
-                stats_agente[admin_id]['total'] += 1
-                
-                if nota >= 4:
-                    stats_agente[admin_id]['pos'] += 1
-                    global_pos += 1
-                elif nota == 3:
-                    stats_agente[admin_id]['neu'] += 1
-                    global_neu += 1
-                else:
-                    stats_agente[admin_id]['neg'] += 1
-                    global_neg += 1
+            # Verifica se tem avaliação válida
+            rating_obj = conv.get('conversation_rating')
+            if not rating_obj or not isinstance(rating_obj, dict): 
+                continue 
+            
+            nota = rating_obj.get('rating')
+            if nota is None: continue
+
+            if admin_id not in stats_agente:
+                stats_agente[admin_id] = {'pos': 0, 'neu': 0, 'neg': 0, 'total': 0}
+            
+            stats_agente[admin_id]['total'] += 1
+            
+            if nota >= 4:
+                stats_agente[admin_id]['pos'] += 1
+                global_pos += 1
+            elif nota == 3:
+                stats_agente[admin_id]['neu'] += 1
+                global_neu += 1
+            else:
+                stats_agente[admin_id]['neg'] += 1
+                global_neg += 1
                     
         return stats_agente, {'pos': global_pos, 'neu': global_neu, 'neg': global_neg}
-    except:
+    except Exception as e:
+        print(f"Erro CSAT: {e}")
         return {}, {'pos': 0, 'neu': 0, 'neg': 0}
 
 # --- INTERFACE VISUAL ---
@@ -261,7 +279,6 @@ with placeholder.container():
     tabela_dados = []
     
     # --- CÁLCULO DOS KPIs DO TIME (GERAL) ---
-    # Aqui aplicamos a regra: No time, conta tudo (incluindo neutras)
     def calc_csat_padrao(stats):
         total = stats['pos'] + stats['neu'] + stats['neg']
         if total > 0:
@@ -284,7 +301,7 @@ with placeholder.container():
         total_dia = dict_stats_dia.get(sid, 0)
         recente_30 = dict_stats_30min.get(sid, 0)
         
-        # --- CÁLCULO DO CSAT AGENTE (REGRA ESPECÍFICA) ---
+        # --- CÁLCULO DO CSAT AGENTE ---
         dados_h = csat_hoje_stats.get(sid, {'pos':0, 'neu':0, 'neg':0, 'total':0})
         
         # Regra do Agente: Ignora Neutras (Positivas / (Positivas + Negativas))
@@ -295,7 +312,7 @@ with placeholder.container():
         else:
             txt_csat_agente = "-"
 
-        # CSAT Mês do Agente (Também ajustado ou padrão? Vou manter ajustado p/ consistência)
+        # CSAT Mês do Agente (Ajustado)
         dados_m = csat_mes_stats.get(sid, {'pos':0, 'neu':0, 'neg':0, 'total':0})
         total_valido_m = dados_m['pos'] + dados_m['neg']
         if total_valido_m > 0:
@@ -312,21 +329,20 @@ with placeholder.container():
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta_abertos}",
             "Total Dia": total_dia,
-            "CSAT Hoje (Ajustado)": txt_csat_agente, # Nome da coluna alterado
+            "CSAT Hoje (Ajustado)": txt_csat_agente,
             "CSAT Mês (Ajustado)": txt_csat_mes,
             "Últimos 30min": f"{recente_30} {alerta_vol}",
             "Pausados": pausados
         })
 
     # --- CARDS DO TOPO ---
-    col1, col2, col3, col4, col5 = st.columns(5) # Aumentei pra 5 colunas pra caber o CSAT Time
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric("Fila de Espera", total_fila, "Aguardando", delta_color="inverse")
     with col2:
         st.metric("Volume (Dia)", total_dia_geral, "Tickets")
     with col3:
-        # Novo Card: Mostra a saúde do time considerando neutras
         st.metric("CSAT Time (Dia/Mês)", f"{csat_time_hoje:.0f}% / {csat_time_mes:.0f}%", "Inclui Neutras")
     with col4:
         st.metric("Agentes Online", agentes_online, f"Meta: {META_AGENTES}")
@@ -388,10 +404,17 @@ with placeholder.container():
             st.info("Nenhuma conversa hoje.")
 
     st.markdown("---")
-    with st.expander("ℹ️ **Legenda CSAT**"):
+    # --- LEGENDA UNIFICADA (CORRIGIDO) ---
+    with st.expander("ℹ️ **Legenda Completa** (Clique para expandir)"):
         st.markdown("""
-        * **CSAT Agente (Ajustado):** Ignora avaliações Neutras (3). Fórmula: `Positivas / (Positivas + Negativas)`.
-        * **CSAT Time (Geral):** Considera avaliações Neutras. Fórmula: `Positivas / Total de Avaliações`.
+        #### **Status e Ícones**
+        * 🟢/🔴 **Status:** Indica se o agente está Online ou em modo "Away".
+        * ⚠️ **Sobrecarga:** Agente com **5 ou mais** tickets abertos.
+        * ⚡ **Alta Demanda:** Agente recebeu **3 ou mais** tickets novos em 30min.
+
+        #### **Regras do CSAT**
+        * **CSAT Agente (Ajustado):** A fórmula é `Positivas / (Positivas + Negativas)`. **Ignora as avaliações Neutras (3)** para não prejudicar a nota individual.
+        * **CSAT Time (Geral):** A fórmula é `Positivas / Total de Avaliações`. **Considera as Neutras**, o que reflete a satisfação global da empresa.
         """)
 
 time.sleep(60)
