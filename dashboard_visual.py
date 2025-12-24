@@ -85,11 +85,9 @@ def get_team_queue_details(team_id):
         return detalhes_fila
     except: return []
 
-# ALTERADO: Agora aceita 'ts_inicio' como parâmetro
 def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
-        # O corte para "recente" continua sendo baseado no momento atual
         ts_corte_recente = int(time.time()) - (minutos_recente * 60)
 
         payload = {
@@ -121,7 +119,6 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
         return total_periodo, total_recente, stats_periodo, stats_30min
     except: return 0, 0, {}, {}
 
-# ALTERADO: Agora aceita 'ts_inicio' como parâmetro
 def get_latest_conversations(team_id, ts_inicio, limit=10):
     try:
         url = "https://api.intercom.io/conversations/search"
@@ -142,21 +139,21 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
         return []
     except: return []
 
-# --- FUNÇÃO: TENDÊNCIAS ---
+# --- FUNÇÃO: TENDÊNCIAS (REFINADA) ---
 def get_trending_topics(team_id):
     try:
         url = "https://api.intercom.io/conversations/search"
-        # Pega conversas das ultimas 3 horas para ser bem "tempo real"
+        # Analisa conversas das últimas 6 horas para ter mais dados, já que o filtro é restrito
         payload = {
             "query": {
                 "operator": "AND",
                 "value": [
-                    {"field": "created_at", "operator": ">", "value": int(time.time()) - 10800},
+                    {"field": "created_at", "operator": ">", "value": int(time.time()) - 21600},
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
             "sort": { "field": "created_at", "order": "descending" },
-            "pagination": {"per_page": 50} 
+            "pagination": {"per_page": 80} 
         }
         
         response = requests.post(url, json=payload, headers=headers)
@@ -165,12 +162,42 @@ def get_trending_topics(team_id):
         conversas = response.json().get('conversations', [])
         todas_palavras = []
         
-        # Stopwords (palavras para ignorar)
-        ignorar = ["ola", "olá", "bom", "dia", "tarde", "noite", "gostaria", "queria", "estou", 
-                   "esta", "está", "com", "para", "que", "uma", "um", "o", "a", "e", "do", "da", 
-                   "em", "no", "na", "os", "as", "dos", "das", "por", "favor", "ajuda", "entendi",
-                   "obrigado", "obrigada", "tudo", "bem", "como", "posso", "fazer", "pode", "ser",
-                   "preciso", "sobre", "mas", "tem", "não", "nao", "pelo"]
+        # --- LISTAS DE FILTRO ---
+        ignorar = [
+            "ola", "olá", "bom", "dia", "tarde", "noite", "gostaria", "queria", "estou", 
+            "esta", "está", "com", "para", "que", "uma", "um", "o", "a", "e", "do", "da", 
+            "em", "no", "na", "os", "as", "dos", "das", "por", "favor", "ajuda", "entendi",
+            "obrigado", "obrigada", "tudo", "bem", "como", "posso", "fazer", "pode", "ser",
+            "preciso", "sobre", "mas", "tem", "não", "nao", "pelo", "pela", "meu", "minha",
+            "aqui", "agora", "hoje", "voce", "você", "isso", "esse", "essa", "tá", "ta",
+            "sim", "nos", "nós", "ficar", "fico", "então", "entao", "gente", "cara", "amigo",
+            "pois", "somente", "apenas", "tenho", "tinha", "ter", "tive", "estava", "esteve",
+            "estive", "só", "so", "muito", "pouco", "mais", "menos", "grande", "pequeno",
+            "novo", "velho", "certo", "errado", "fui", "foi", "vai", "vou", "vamos", "vão",
+            "saber", "sei", "soube", "dizer", "disse", "falar", "falou", "mencionar",
+            "algum", "alguma", "nenhum", "nenhuma", "todos", "todas", "qual", "quais",
+            "quem", "quando", "onde", "porque", "porquê", "porem", "porém", "conigo",
+            "consigo", "consegue", "tentei", "tentar", "ainda", "assim", "mesmo", "ja", "já",
+            "vence", "vencido", "atividade", "atividades", "computador", "envio", "enviar",
+            "fiz", "mim", "pessoal", "acertou", "voltou", "sistema", "sistemas", 
+            "inativo", "voltar", "volta", "teste", "testar", "parte", "lado", "outro",
+            "pra", "sem", "sai", "pagina", "boa", "verifiquem", "precisando", "realizar", 
+            "usuario", "usuário", "fechamento", "verificar", "aguardo",
+            "problemas", "resolver", "resolvido", "telefone", "seria",
+            "conseguem", "conseguir", "assinatura", "complicando", "encerrando", 
+            "consertar", "arrumar", "ajudar", "usar", "utilizar", "estamos", "nossa", "nosso",
+            "consigo", "consegue", "consegui"
+        ]
+
+        termos_tecnicos = [
+            "erro", "falha", "bug", "travou", "lento", "lentidao", "caiu", "fora",
+            "sincroniz", "sync", "integrac", "integraç", 
+            "export", "relatorio", "relatório", "gerar", "baixar", "download",
+            "acesso", "login", "senha", "entrar", "logar", "token", "api",
+            "pagamento", "boleto", "fatura", "plano", "cartao", "cartão", "pendente",
+            "ios", "android", "app", "aplicativo", "celular", "mobile",
+            "notificacao", "notificação", "email", "e-mail", "mensagem"
+        ]
 
         for conv in conversas:
             texto_html = conv.get('source', {}).get('body', '')
@@ -178,20 +205,29 @@ def get_trending_topics(team_id):
             
             # Limpeza básica
             texto_limpo = re.sub(r'<[^>]+>', ' ', texto_html).lower()
-            texto_limpo = re.sub(r'[^\w\s]', '', texto_limpo)
+            texto_limpo = re.sub(r'[^\w\s-]', '', texto_limpo) # Mantém hífen para e-mail
             
             palavras = texto_limpo.split()
             for p in palavras:
-                if len(p) > 3 and p not in ignorar:
-                    todas_palavras.append(p)
-                    
+                # 1. Filtra lixo
+                if p in ignorar or len(p) < 3: continue
+                
+                # 2. Busca correspondência técnica
+                for termo in termos_tecnicos:
+                    if termo in p: # Ex: detecta "integracao" através de "integrac"
+                        # Armazena o termo raiz para agrupar (ex: todas integrações viram "integrac")
+                        # Para ficar bonito na tela, vamos usar o termo detectado ou uma versão limpa
+                        todas_palavras.append(termo.upper())
+                        break
+
+        # Retorna os 5 termos técnicos mais frequentes
         return Counter(todas_palavras).most_common(5)
     except: return []
 
 # --- INTERFACE ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
 
-# --- NOVO: SELETOR DE PERÍODO ---
+# --- SELETOR DE PERÍODO ---
 col_filtro, _ = st.columns([1, 3])
 with col_filtro:
     periodo_selecionado = st.radio(
@@ -206,28 +242,22 @@ placeholder = st.empty()
 fuso_br = timezone(timedelta(hours=-3))
 
 with placeholder.container():
-    # Definição do Timestamp de Início com base na seleção
+    # Definição do Timestamp de Início
     now = datetime.now(fuso_br)
     
     if "Hoje" in periodo_selecionado:
-        # Começo do dia atual (Midnight)
         ts_inicio = int(now.replace(hour=0, minute=0, second=0).timestamp())
         texto_volume = "Volume (Dia / 30min)"
     else:
-        # Agora menos 48 horas
         ts_inicio = int((now - timedelta(hours=48)).timestamp())
         texto_volume = "Volume (48h / 30min)"
 
-    # Coleta
+    # Coleta de Dados
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
-    
-    # Passamos o ts_inicio calculado
     vol_periodo, vol_rec, stats_periodo, stats_rec = get_daily_stats(TEAM_ID, ts_inicio)
     ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
-    
-    # Coleta de Tendências
     top_assuntos = get_trending_topics(TEAM_ID)
     
     online = 0
@@ -255,7 +285,7 @@ with placeholder.container():
             "Pausados": pausados
         })
     
-    # Cards
+    # Cards Principais
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
     c2.metric(texto_volume, f"{vol_periodo} / {vol_rec}")
@@ -264,14 +294,25 @@ with placeholder.container():
     
     # --- ÁREA DE TENDÊNCIAS ---
     if top_assuntos:
-        st.markdown("##### 🔥 Assuntos do Momento (Termos Frequentes)")
+        st.markdown("##### 🔥 Problemas Identificados (Filtro Técnico)")
         cols_topics = st.columns(5)
         for i, (termo, qtd) in enumerate(top_assuntos):
+            # Mapeamento visual para ficar mais bonito que o radical técnico
+            display_map = {
+                "INTEGRAC": "INTEGRAÇÃO", "RELATORIO": "RELATÓRIO", 
+                "NOTIFICACAO": "NOTIFICAÇÃO", "CARTAO": "CARTÃO", 
+                "SINCRONIZ": "SYNC/DADOS", "LENTIDAO": "LENTIDÃO"
+            }
+            termo_visual = display_map.get(termo, termo)
+            
             cor = "red" if qtd >= 1 else "gray"
-            cols_topics[i].markdown(f":{cor}[**{termo.upper()}**] ({qtd})")
+            cols_topics[i].markdown(f":{cor}[**{termo_visual}**] ({qtd})")
+        st.markdown("---")
+    else:
+        st.info("Nenhum termo técnico crítico detectado nas últimas horas.")
         st.markdown("---")
     
-    # Alertas
+    # Alerta de Fila
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -284,7 +325,7 @@ with placeholder.container():
     if online < META_AGENTES:
         st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta!")
 
-    # Tabelas
+    # Tabelas de Dados
     c_left, c_right = st.columns([2, 1])
 
     with c_left:
@@ -301,20 +342,17 @@ with placeholder.container():
         hist_dados = []
         for conv in ultimas:
             dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
-            hora_fmt = dt_obj.strftime('%d/%m %H:%M') # Adicionei Data para clareza se for 48h
+            hora_fmt = dt_obj.strftime('%d/%m %H:%M')
             
             adm_id = conv.get('admin_assignee_id')
             nome_agente = "Sem Dono"
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
-            # --- LÓGICA DE RESUMO ---
             subject = conv.get('source', {}).get('subject', '')
-            
             if not subject:
                 body = conv.get('source', {}).get('body', '')
                 clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
-                
                 if not clean_body and ('<img' in body or '<figure' in body):
                     subject = "📷 [Imagem/Anexo]"
                 elif not clean_body:
@@ -348,17 +386,17 @@ with placeholder.container():
             st.info("Sem conversas no período.")
 
     st.markdown("---")
-    with st.expander("ℹ️ **Legenda e Sugestões de Ação**"):
+    with st.expander("ℹ️ **Legenda e Ações**"):
         st.markdown("""
-        #### **Status do Agente**
-        * 🟢 **Online:** Agente ativo e disponível.
-        * 🔴 **Ausente:** Agente em modo "Away".
-
-        #### **Alertas e Sugestões**
-        * ⚠️ **Sobrecarga (Triângulo):** Agente com **5 ou mais** tickets abertos. *Sugestão: Oferecer ajuda.*
-        * ⚡ **Alta Demanda (Raio):** Agente recebeu **3 ou mais** tickets nos últimos 30min. *Sugestão: Pausar distribuição.*
-        * 🔥 **Assuntos do Momento:** Termos mais repetidos nos últimos 50 tickets. Se aparecer "Erro" ou "Falha" em vermelho, verifique sistemas.
+        * 🟢/🔴 **Status:** Online ou Ausente (Away).
+        * ⚠️ **Sobrecarga:** Agente com 5+ tickets abertos.
+        * ⚡ **Alta Demanda:** Agente recebeu 3+ tickets em 30min.
+        * 🔥 **Filtro Técnico:** Contagem de termos como 'Erro', 'Falha', 'Sync' nos tickets recentes.
         """)
 
 time.sleep(60)
 st.rerun()
+
+time.sleep(60)
+st.rerun()
+
