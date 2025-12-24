@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import re
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 
 # --- CONFIGURAÇÕES ---
@@ -18,7 +20,7 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# --- FUNÇÕES RÁPIDAS (OPERACIONAIS) ---
+# --- FUNÇÕES ---
 
 def get_admin_details():
     try:
@@ -142,6 +144,52 @@ def get_latest_conversations(team_id, limit=10):
         return []
     except: return []
 
+# --- NOVA FUNÇÃO: TENDÊNCIAS ---
+def get_trending_topics(team_id):
+    try:
+        url = "https://api.intercom.io/conversations/search"
+        # Pega conversas das ultimas 3 horas para ser bem "tempo real"
+        payload = {
+            "query": {
+                "operator": "AND",
+                "value": [
+                    {"field": "created_at", "operator": ">", "value": int(time.time()) - 10800},
+                    {"field": "team_assignee_id", "operator": "=", "value": team_id}
+                ]
+            },
+            "sort": { "field": "created_at", "order": "descending" },
+            "pagination": {"per_page": 50} 
+        }
+        
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code != 200: return []
+        
+        conversas = response.json().get('conversations', [])
+        todas_palavras = []
+        
+        # Stopwords (palavras para ignorar)
+        ignorar = ["ola", "olá", "bom", "dia", "tarde", "noite", "gostaria", "queria", "estou", 
+                   "esta", "está", "com", "para", "que", "uma", "um", "o", "a", "e", "do", "da", 
+                   "em", "no", "na", "os", "as", "dos", "das", "por", "favor", "ajuda", "entendi",
+                   "obrigado", "obrigada", "tudo", "bem", "como", "posso", "fazer", "pode", "ser",
+                   "preciso", "sobre", "mas", "tem", "não", "nao", "pelo"]
+
+        for conv in conversas:
+            texto_html = conv.get('source', {}).get('body', '')
+            if not texto_html: continue
+            
+            # Limpeza básica
+            texto_limpo = re.sub(r'<[^>]+>', ' ', texto_html).lower()
+            texto_limpo = re.sub(r'[^\w\s]', '', texto_limpo)
+            
+            palavras = texto_limpo.split()
+            for p in palavras:
+                if len(p) > 3 and p not in ignorar:
+                    todas_palavras.append(p)
+                    
+        return Counter(todas_palavras).most_common(5)
+    except: return []
+
 # --- INTERFACE ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
 st.markdown("---")
@@ -150,17 +198,19 @@ placeholder = st.empty()
 fuso_br = timezone(timedelta(hours=-3))
 
 with placeholder.container():
-    # Coleta de dados
+    # Coleta
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
     vol_dia, vol_rec, stats_dia, stats_rec = get_daily_stats(TEAM_ID)
-    ultimas = get_latest_conversations(TEAM_ID, 10) # Recuperando ultimas conversas
+    ultimas = get_latest_conversations(TEAM_ID, 10)
+    
+    # Coleta de Tendências (Novo)
+    top_assuntos = get_trending_topics(TEAM_ID)
     
     online = 0
     tabela = []
     
-    # Processamento da tabela principal
     for mid in ids_time:
         sid = str(mid)
         info = admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
@@ -183,14 +233,23 @@ with placeholder.container():
             "Pausados": pausados
         })
     
-    # Cards do Topo
+    # Cards
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
-    c2.metric("Volume (Dia / 30min)", f"{vol_dia} / {vol_rec}") # Trazendo de volta o 30min
+    c2.metric("Volume (Dia / 30min)", f"{vol_dia} / {vol_rec}")
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(fuso_br).strftime("%H:%M:%S"))
     
-    # Alerta de Fila com Links
+    # --- ÁREA DE TENDÊNCIAS (NOVO) ---
+    if top_assuntos:
+        st.markdown("##### 🔥 Assuntos do Momento (Termos Frequentes)")
+        cols_topics = st.columns(5)
+        for i, (termo, qtd) in enumerate(top_assuntos):
+            cor = "red" if qtd >= 3 else "gray"
+            cols_topics[i].markdown(f":{cor}[**{termo.upper()}**] ({qtd})")
+        st.markdown("---")
+    
+    # Alertas
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -203,9 +262,7 @@ with placeholder.container():
     if online < META_AGENTES:
         st.warning(f"⚠️ **Atenção:** Equipe abaixo da meta!")
 
-    st.markdown("---")
-
-    # Divisão em duas colunas (Principal e Lateral)
+    # Tabelas
     c_left, c_right = st.columns([2, 1])
 
     with c_left:
@@ -229,11 +286,19 @@ with placeholder.container():
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
+            # Tenta pegar assunto (subject) ou inicio do corpo para dar contexto na lista
+            subject = conv.get('source', {}).get('subject', '')
+            if not subject:
+                body = conv.get('source', {}).get('body', '')
+                clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
+                subject = clean_body[:30] + "..." if len(clean_body) > 30 else clean_body
+            
             c_id = conv['id']
             link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
             
             hist_dados.append({
                 "Hora": hora_fmt,
+                "Assunto": subject, # Adicionei o assunto aqui também!
                 "Agente": nome_agente,
                 "Link": link
             })
@@ -241,16 +306,18 @@ with placeholder.container():
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
-                column_config={"Link": st.column_config.LinkColumn("Ticket", display_text="Abrir")},
+                column_config={
+                    "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir"),
+                    "Assunto": st.column_config.TextColumn("Resumo", width="medium")
+                },
                 hide_index=True,
                 disabled=True,
                 use_container_width=True,
-                key=f"hist_{int(time.time())}" # Key dinâmica pra evitar erro de duplicidade no rerun
+                key=f"hist_{int(time.time())}" 
             )
         else:
             st.info("Sem conversas hoje.")
 
-    # Legenda (Trazida de volta)
     st.markdown("---")
     with st.expander("ℹ️ **Legenda e Sugestões de Ação**"):
         st.markdown("""
@@ -259,17 +326,14 @@ with placeholder.container():
         * 🔴 **Ausente:** Agente em modo "Away".
 
         #### **Alertas e Sugestões**
-        * ⚠️ **Sobrecarga (Triângulo):**
-            * *Ocorre quando:* Agente tem **5 ou mais** tickets abertos.
-            * *Sugestão:* **Verificar se o agente precisa de ajuda para finalizar os atendimentos.**
-        
-        * ⚡ **Alta Demanda (Raio):**
-            * *Ocorre quando:* Agente recebeu **3 ou mais** tickets nos últimos 30min.
-            * *Sugestão:* **O agente está recebendo uma rajada de tickets. Avaliar se estamos com algum erro, como por exemplo queda na exportação ou se é necessário solicitar reforço no chat.**
+        * ⚠️ **Sobrecarga (Triângulo):** Agente com **5 ou mais** tickets abertos. *Sugestão: Oferecer ajuda.*
+        * ⚡ **Alta Demanda (Raio):** Agente recebeu **3 ou mais** tickets nos últimos 30min. *Sugestão: Pausar distribuição.*
+        * 🔥 **Assuntos do Momento:** Termos mais repetidos nos últimos 50 tickets. Se aparecer "Erro" ou "Falha" em vermelho, verifique sistemas.
         """)
 
 time.sleep(60)
 st.rerun()
+
 
 
 
