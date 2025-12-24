@@ -144,7 +144,7 @@ def get_latest_conversations(team_id, limit=10):
         return []
     except: return []
 
-# --- NOVA FUNÇÃO: TENDÊNCIAS ---
+# --- FUNÇÃO: TENDÊNCIAS ---
 def get_trending_topics(team_id):
     try:
         url = "https://api.intercom.io/conversations/search"
@@ -205,7 +205,7 @@ with placeholder.container():
     vol_dia, vol_rec, stats_dia, stats_rec = get_daily_stats(TEAM_ID)
     ultimas = get_latest_conversations(TEAM_ID, 10)
     
-    # Coleta de Tendências (Novo)
+    # Coleta de Tendências
     top_assuntos = get_trending_topics(TEAM_ID)
     
     online = 0
@@ -240,12 +240,12 @@ with placeholder.container():
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(fuso_br).strftime("%H:%M:%S"))
     
-    # --- ÁREA DE TENDÊNCIAS (NOVO) ---
+    # --- ÁREA DE TENDÊNCIAS ---
     if top_assuntos:
         st.markdown("##### 🔥 Assuntos do Momento (Termos Frequentes)")
         cols_topics = st.columns(5)
         for i, (termo, qtd) in enumerate(top_assuntos):
-            cor = "red" if qtd >= 3 else "gray"
+            cor = "red" if qtd >= 1 else "gray"
             cols_topics[i].markdown(f":{cor}[**{termo.upper()}**] ({qtd})")
         st.markdown("---")
     
@@ -286,19 +286,29 @@ with placeholder.container():
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
-            # Tenta pegar assunto (subject) ou inicio do corpo para dar contexto na lista
+            # --- LÓGICA DE RESUMO ATUALIZADA ---
             subject = conv.get('source', {}).get('subject', '')
+            
             if not subject:
                 body = conv.get('source', {}).get('body', '')
+                # Limpa HTML
                 clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
-                subject = clean_body[:30] + "..." if len(clean_body) > 30 else clean_body
+                
+                # Regra para Imagem/Anexo e Vazio
+                if not clean_body and ('<img' in body or '<figure' in body):
+                    subject = "📷 [Imagem/Anexo]"
+                elif not clean_body:
+                    subject = "(Sem texto)"
+                else:
+                    # Aumentei o limite para 60 caracteres
+                    subject = clean_body[:60] + "..." if len(clean_body) > 60 else clean_body
             
             c_id = conv['id']
             link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
             
             hist_dados.append({
                 "Hora": hora_fmt,
-                "Assunto": subject, # Adicionei o assunto aqui também!
+                "Assunto": subject, 
                 "Agente": nome_agente,
                 "Link": link
             })
@@ -308,7 +318,7 @@ with placeholder.container():
                 pd.DataFrame(hist_dados),
                 column_config={
                     "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir"),
-                    "Assunto": st.column_config.TextColumn("Resumo", width="medium")
+                    "Assunto": st.column_config.TextColumn("Resumo", width="large") # Mudei width para large
                 },
                 hide_index=True,
                 disabled=True,
@@ -333,9 +343,3 @@ with placeholder.container():
 
 time.sleep(60)
 st.rerun()
-
-
-
-
-
-
