@@ -85,18 +85,18 @@ def get_team_queue_details(team_id):
         return detalhes_fila
     except: return []
 
-def get_daily_stats(team_id, minutos_recente=30):
+# ALTERADO: Agora aceita 'ts_inicio' como parâmetro
+def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
     try:
         url = "https://api.intercom.io/conversations/search"
-        fuso_br = timezone(timedelta(hours=-3))
-        ts_hoje = int(datetime.now(fuso_br).replace(hour=0, minute=0, second=0).timestamp())
-        ts_corte = int(time.time()) - (minutos_recente * 60)
+        # O corte para "recente" continua sendo baseado no momento atual
+        ts_corte_recente = int(time.time()) - (minutos_recente * 60)
 
         payload = {
             "query": {
                 "operator": "AND",
                 "value": [
-                    {"field": "created_at", "operator": ">", "value": ts_hoje},
+                    {"field": "created_at", "operator": ">", "value": ts_inicio},
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
@@ -104,34 +104,32 @@ def get_daily_stats(team_id, minutos_recente=30):
         }
         
         response = requests.post(url, json=payload, headers=headers)
-        stats_dia = {}
+        stats_periodo = {}
         stats_30min = {}
-        total_dia = 0
+        total_periodo = 0
         total_recente = 0
         
         if response.status_code == 200:
             conversas = response.json().get('conversations', [])
-            total_dia = len(conversas)
+            total_periodo = len(conversas)
             for conv in conversas:
                 aid = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
-                stats_dia[aid] = stats_dia.get(aid, 0) + 1
-                if conv['created_at'] > ts_corte:
+                stats_periodo[aid] = stats_periodo.get(aid, 0) + 1
+                if conv['created_at'] > ts_corte_recente:
                     stats_30min[aid] = stats_30min.get(aid, 0) + 1
                     total_recente += 1
-        return total_dia, total_recente, stats_dia, stats_30min
+        return total_periodo, total_recente, stats_periodo, stats_30min
     except: return 0, 0, {}, {}
 
-def get_latest_conversations(team_id, limit=10):
+# ALTERADO: Agora aceita 'ts_inicio' como parâmetro
+def get_latest_conversations(team_id, ts_inicio, limit=10):
     try:
-        fuso_br = timezone(timedelta(hours=-3))
-        ts_hoje = int(datetime.now(fuso_br).replace(hour=0, minute=0, second=0).timestamp())
-
         url = "https://api.intercom.io/conversations/search"
         payload = {
             "query": {
                 "operator": "AND",
                 "value": [
-                    {"field": "created_at", "operator": ">", "value": ts_hoje},
+                    {"field": "created_at", "operator": ">", "value": ts_inicio},
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
@@ -192,18 +190,42 @@ def get_trending_topics(team_id):
 
 # --- INTERFACE ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
+
+# --- NOVO: SELETOR DE PERÍODO ---
+col_filtro, _ = st.columns([1, 3])
+with col_filtro:
+    periodo_selecionado = st.radio(
+        "📅 Período de Análise:", 
+        ["Hoje (Desde 00:00)", "Últimas 48h"], 
+        horizontal=True
+    )
+
 st.markdown("---")
 
 placeholder = st.empty()
 fuso_br = timezone(timedelta(hours=-3))
 
 with placeholder.container():
+    # Definição do Timestamp de Início com base na seleção
+    now = datetime.now(fuso_br)
+    
+    if "Hoje" in periodo_selecionado:
+        # Começo do dia atual (Midnight)
+        ts_inicio = int(now.replace(hour=0, minute=0, second=0).timestamp())
+        texto_volume = "Volume (Dia / 30min)"
+    else:
+        # Agora menos 48 horas
+        ts_inicio = int((now - timedelta(hours=48)).timestamp())
+        texto_volume = "Volume (48h / 30min)"
+
     # Coleta
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
-    vol_dia, vol_rec, stats_dia, stats_rec = get_daily_stats(TEAM_ID)
-    ultimas = get_latest_conversations(TEAM_ID, 10)
+    
+    # Passamos o ts_inicio calculado
+    vol_periodo, vol_rec, stats_periodo, stats_rec = get_daily_stats(TEAM_ID, ts_inicio)
+    ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
     # Coleta de Tendências
     top_assuntos = get_trending_topics(TEAM_ID)
@@ -228,7 +250,7 @@ with placeholder.container():
             "Status": emoji,
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta}",
-            "Volume Dia": stats_dia.get(sid, 0),
+            "Volume Período": stats_periodo.get(sid, 0),
             "Recente (30m)": f"{stats_rec.get(sid, 0)} {raio}",
             "Pausados": pausados
         })
@@ -236,7 +258,7 @@ with placeholder.container():
     # Cards
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
-    c2.metric("Volume (Dia / 30min)", f"{vol_dia} / {vol_rec}")
+    c2.metric(texto_volume, f"{vol_periodo} / {vol_rec}")
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(fuso_br).strftime("%H:%M:%S"))
     
@@ -271,7 +293,7 @@ with placeholder.container():
             pd.DataFrame(tabela), 
             use_container_width=True, 
             hide_index=True,
-            column_order=["Status", "Agente", "Abertos", "Volume Dia", "Recente (30m)", "Pausados"]
+            column_order=["Status", "Agente", "Abertos", "Volume Período", "Recente (30m)", "Pausados"]
         )
 
     with c_right:
@@ -279,35 +301,32 @@ with placeholder.container():
         hist_dados = []
         for conv in ultimas:
             dt_obj = datetime.fromtimestamp(conv['created_at'], tz=fuso_br)
-            hora_fmt = dt_obj.strftime('%H:%M')
+            hora_fmt = dt_obj.strftime('%d/%m %H:%M') # Adicionei Data para clareza se for 48h
             
             adm_id = conv.get('admin_assignee_id')
             nome_agente = "Sem Dono"
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
-            # --- LÓGICA DE RESUMO ATUALIZADA ---
+            # --- LÓGICA DE RESUMO ---
             subject = conv.get('source', {}).get('subject', '')
             
             if not subject:
                 body = conv.get('source', {}).get('body', '')
-                # Limpa HTML
                 clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
                 
-                # Regra para Imagem/Anexo e Vazio
                 if not clean_body and ('<img' in body or '<figure' in body):
                     subject = "📷 [Imagem/Anexo]"
                 elif not clean_body:
                     subject = "(Sem texto)"
                 else:
-                    # Aumentei o limite para 60 caracteres
                     subject = clean_body[:60] + "..." if len(clean_body) > 60 else clean_body
             
             c_id = conv['id']
             link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
             
             hist_dados.append({
-                "Hora": hora_fmt,
+                "Data/Hora": hora_fmt,
                 "Assunto": subject, 
                 "Agente": nome_agente,
                 "Link": link
@@ -318,7 +337,7 @@ with placeholder.container():
                 pd.DataFrame(hist_dados),
                 column_config={
                     "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir"),
-                    "Assunto": st.column_config.TextColumn("Resumo", width="large") # Mudei width para large
+                    "Assunto": st.column_config.TextColumn("Resumo", width="large")
                 },
                 hide_index=True,
                 disabled=True,
@@ -326,7 +345,7 @@ with placeholder.container():
                 key=f"hist_{int(time.time())}" 
             )
         else:
-            st.info("Sem conversas hoje.")
+            st.info("Sem conversas no período.")
 
     st.markdown("---")
     with st.expander("ℹ️ **Legenda e Sugestões de Ação**"):
