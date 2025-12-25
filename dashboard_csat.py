@@ -26,8 +26,7 @@ def get_csat_clean_data(team_id):
     
     url = "https://api.intercom.io/conversations/search"
     
-    # CORREÇÃO 1: Busco por 'updated_at' em vez de 'created_at'.
-    # Isso traz conversas antigas que receberam avaliação neste mês.
+    # Busco por 'updated_at' para pegar conversas antigas avaliadas neste mês
     payload = {
         "query": {
             "operator": "AND",
@@ -43,7 +42,7 @@ def get_csat_clean_data(team_id):
     placeholder_msg = st.empty()
     placeholder_msg.info("⏳ Buscando avaliações... (Analisando tickets atualizados)")
     
-    # Busca até 10 páginas (garantia de ler tudo)
+    # Busca até 10 páginas
     for i in range(10):
         r = requests.post(url, json=payload, headers=headers)
         if r.status_code == 200:
@@ -61,20 +60,17 @@ def get_csat_clean_data(team_id):
     
     for c in todas_conversas:
         aid = str(c.get('admin_assignee_id'))
-        # Se não tem dono ou não tem nota, pula
         if not aid or not c.get('conversation_rating'): continue
         
         rating_obj = c['conversation_rating']
         nota = rating_obj.get('rating')
         if nota is None: continue
         
-        # CORREÇÃO 2: Verifico se a DATA DA NOTA é deste mês.
-        # Se a nota for antiga (ticket atualizado por outro motivo), ignora.
+        # Verifica se a DATA DA NOTA é deste mês
         data_nota = rating_obj.get('created_at')
         if data_nota and data_nota < ts_inicio_mes:
             continue
 
-        # Inicializa agente se não existir
         if aid not in stats: stats[aid] = {'pos':0, 'neu':0, 'neg':0, 'total':0}
         
         stats[aid]['total'] += 1
@@ -119,13 +115,19 @@ tabela = []
 for aid, s in stats_agentes.items():
     nome = admins.get(aid, "Desconhecido")
     
-    # CSAT Ajustado (Sem Neutras)
+    # 1. CSAT Ajustado (Ignora as Neutras, foca em Polarização)
     valido = s['pos'] + s['neg']
     csat_ajustado = (s['pos'] / valido * 100) if valido > 0 else 0
+    
+    # 2. --- NOVO CÁLCULO: CSAT Real (Considera Neutras no denominador) ---
+    # Fórmula: Positivas / Total Geral (Pos + Neu + Neg)
+    total_geral = s['total']
+    csat_real = (s['pos'] / total_geral * 100) if total_geral > 0 else 0
     
     tabela.append({
         "Agente": nome,
         "CSAT (Ajustado)": f"{csat_ajustado:.1f}%",
+        "CSAT (Real)": f"{csat_real:.1f}%", # <--- Nova Coluna Aqui
         "Avaliações": s['total'],
         "😍": s['pos'],
         "😐": s['neu'],
@@ -135,9 +137,12 @@ for aid, s in stats_agentes.items():
 if tabela:
     # Ordena por quem tem mais avaliações
     df = pd.DataFrame(tabela).sort_values("Avaliações", ascending=False)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Reordenar colunas para ficar visualmente agradável
+    colunas_ordem = ["Agente", "CSAT (Ajustado)", "CSAT (Real)", "Avaliações", "😍", "😐", "😡"]
+    st.dataframe(df, use_container_width=True, hide_index=True, column_order=colunas_ordem)
 else:
     st.info("Nenhuma avaliação encontrada neste mês.")
 
 st.markdown("---")
-st.caption("ℹ️ **Nota:** O CSAT Geral considera todas as notas. O CSAT Ajustado dos agentes ignora as Neutras.")
+st.caption("ℹ️ **Legenda:**\n- **CSAT (Ajustado):** Considera apenas Positivas vs Negativas (Ignora Neutras).\n- **CSAT (Real):** Percentual de clientes satisfeitos sobre o TOTAL de atendimentos (Inclui Neutras).")
