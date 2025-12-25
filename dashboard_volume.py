@@ -16,10 +16,10 @@ except:
     TOKEN = "SEU_TOKEN_AQUI"
     APP_ID = "SEU_APP_ID_AQUI"
 
-# IDs Específicos
-TEAM_SUPORTE = 2975006
-TEAM_CS_LEADS = 1972225
-TARGET_TEAMS = [TEAM_SUPORTE, TEAM_CS_LEADS]
+# CONFIGURAÇÃO DOS TIMES
+ID_SUPORTE = 2975006  # Regra: Apenas Criados no período
+ID_CS_LEADS = 1972225 # Regra: Criados OU Movidos no período
+TARGET_TEAMS = [ID_SUPORTE, ID_CS_LEADS]
 
 headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 FUSO_BR = timezone(timedelta(hours=-3)) 
@@ -34,7 +34,7 @@ def get_admin_names():
         return {a['id']: a['name'] for a in r.json().get('admins', [])} if r.status_code == 200 else {}
     except: return {}
 
-def fetch_search_results(payload, progress_bar, label_base):
+def fetch_search_results(payload, progress_bar, label):
     url = "https://api.intercom.io/conversations/search"
     results = []
     
@@ -48,7 +48,7 @@ def fetch_search_results(payload, progress_bar, label_base):
     if total > 0:
         while data.get('pages', {}).get('next'):
             pct = min(len(results) / total, 0.99)
-            progress_bar.progress(pct, text=f"{label_base} ({len(results)} de {total})...")
+            progress_bar.progress(pct, text=f"{label} ({len(results)} de {total})...")
             
             payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
             r = requests.post(url, json=payload, headers=headers)
@@ -64,7 +64,7 @@ def fetch_search_results(payload, progress_bar, label_base):
 # ==========================================
 
 st.title("📈 Relatório Unificado de Suporte")
-st.markdown("Visão focada em **Novas Entradas (Inbound)** e **Leads Trabalhados**.")
+st.markdown("Visão focada em **Novas Entradas de Clientes (Inbound)**.")
 
 with st.sidebar:
     st.header("⚙️ Configuração")
@@ -81,7 +81,7 @@ with st.sidebar:
     st.caption("🔗 **Acesso Rápido:**")
     st.markdown("🚀 [Painel Tempo Real (Operacional)](https://dashboardvisualpy.streamlit.app)")
     st.markdown("⭐ [Painel Focado em CSAT](https://dashboardcsatpy.streamlit.app)")
-    st.info("ℹ️ Excluindo tickets internos (Backoffice).")
+    st.info("ℹ️ Excluindo tickets internos (Admin).")
 
 if btn_gerar:
     # Datas
@@ -97,12 +97,9 @@ if btn_gerar:
     progresso = st.progress(0, text="Conectando API...")
     admins = get_admin_names()
     
-    # -----------------------------------------------------
-    # ESTRATÉGIA DE BUSCA "PENTE FINO"
-    # -----------------------------------------------------
-    # Buscamos TUDO que foi mexido (updated) no período nas caixas alvo.
-    # Depois filtramos no Python para garantir precisão total.
-    
+    # ------------------------------------------------------------------
+    # ESTRATÉGIA: Busca TUDO que mexeu, depois aplica a regra por Time
+    # ------------------------------------------------------------------
     query_unified = {
         "query": {
             "operator": "AND",
@@ -121,45 +118,54 @@ if btn_gerar:
     time.sleep(0.5)
     progresso.empty()
 
-    # --- LISTAS FINAIS ---
+    # --- PROCESSAMENTO ---
     lista_inbound = []
     lista_csat = []
     
-    count_ignored_admin = 0
-    count_ignored_dates = 0
+    # Contadores de Auditoria
+    audit_admin = 0
+    audit_out_date_support = 0
     
     for c in raw_data:
-        # 1. FILTRO DE AUTOR (MATA BACKOFFICE/MANUAL)
-        # Se quem começou foi 'admin', ignoramos totalmente.
+        # ---------------------------------------------------
+        # 1. REGRA DE OURO: REMOVER TUDO QUE É MANUAL/ADMIN
+        # ---------------------------------------------------
         author_type = c.get('source', {}).get('author', {}).get('type')
         if author_type == 'admin':
-            count_ignored_admin += 1
-            continue
+            audit_admin += 1
+            continue # Pula imediatamente
 
-        # Dados Básicos
+        # Dados
         c_created = c.get('created_at', 0)
-        c_updated = c.get('updated_at', 0)
         team_id = int(c.get('team_assignee_id', 0) or 0)
         
-        # 2. LÓGICA DE NEGÓCIO (O QUE ENTRA?)
-        should_include = False
-        status_label = ""
-        
-        # Regra A: Criado no Período (Normal Inbound)
-        if ts_start <= c_created <= ts_end:
-            should_include = True
-            status_label = "🆕 Novo (Inbound)"
-            
-        # Regra B: Exceção CS/Leads (1972225)
-        # Se não foi criado agora, MAS está na caixa de Leads e foi atualizado agora (atribuição manual)
-        elif team_id == TEAM_CS_LEADS and (ts_start <= c_updated <= ts_end):
-            should_include = True
-            status_label = "🔄 Lead Transferido/Movido"
-            
-        else:
-            count_ignored_dates += 1
+        # ---------------------------------------------------
+        # 2. REGRA POR CAIXA (TIME)
+        # ---------------------------------------------------
+        is_valid_volume = False
+        tipo_entrada = ""
 
-        if should_include:
+        # CAIXA SUPORTE (2975006)
+        # Regra: Só conta se foi CRIADO dentro do período.
+        if team_id == ID_SUPORTE:
+            if ts_start <= c_created <= ts_end:
+                is_valid_volume = True
+                tipo_entrada = "Inbound (Suporte)"
+            else:
+                audit_out_date_support += 1 # Auditoria: ticket antigo que recebeu msg nova
+
+        # CAIXA CS/LEADS (1972225)
+        # Regra: Conta se foi CRIADO agora OU se foi MOVIDO agora (updated no periodo)
+        # Como já filtramos 'updated_at' na API, se chegou aqui e não é admin, ele conta.
+        elif team_id == ID_CS_LEADS:
+            is_valid_volume = True
+            if ts_start <= c_created <= ts_end:
+                tipo_entrada = "Inbound (Lead Novo)"
+            else:
+                tipo_entrada = "Movido/Transferido"
+
+        # Adiciona se passou nas regras
+        if is_valid_volume:
             dt_criacao = datetime.fromtimestamp(c_created, tz=FUSO_BR)
             aid = c.get('admin_assignee_id')
             nome_agente = admins.get(str(aid), "Sem Dono / Fila") if aid else "Sem Dono / Fila"
@@ -168,40 +174,44 @@ if btn_gerar:
             
             lista_inbound.append({
                 "DataIso": dt_criacao.date(),
-                "Data Criação": dt_criacao.strftime("%d/%m %H:%M"),
-                "Tipo": status_label,
+                "Data": dt_criacao.strftime("%d/%m %H:%M"),
+                "Tipo": tipo_entrada,
                 "Agente": nome_agente,
                 "Tags": tags,
                 "Link": link_url,
                 "ID": c['id']
             })
 
+        # ---------------------------------------------------
         # 3. LÓGICA DE CSAT (SEPARADA)
+        # ---------------------------------------------------
         rating_obj = c.get('conversation_rating', {})
         if rating_obj and rating_obj.get('rating'):
             r_created = rating_obj.get('created_at', 0)
+            # Nota dada dentro do período
             if ts_start <= r_created <= ts_end:
                 lista_csat.append(c)
 
     # --- VISUALIZAÇÃO ---
-    tab_vol, tab_csat_view = st.tabs(["📊 Volume Real (Clientes)", "⭐ Qualidade (CSAT)"])
+    tab_vol, tab_csat_view = st.tabs(["📊 Volume (Clientes)", "⭐ Qualidade (CSAT)"])
 
     with tab_vol:
         df = pd.DataFrame(lista_inbound)
         
         if not df.empty:
             total = len(df)
-            novos = len(df[df['Tipo'].str.contains("Novo")])
-            movidos = len(df[df['Tipo'].str.contains("Movido")])
+            suporte = len(df[df['Tipo'] == "Inbound (Suporte)"])
+            leads = len(df[df['Tipo'].str.contains("Lead") | df['Tipo'].str.contains("Movido")])
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Volume Total (Clientes)", total, help="Apenas User/Lead. Ignora Backoffice.")
-            c2.metric("🆕 Criados no Período", novos)
-            c3.metric("🔄 Leads Puxados (CS)", movidos, help="Criados antes, mas trabalhados agora na caixa CS.")
+            c1.metric("📬 Total Novos Tickets", total, help="Soma de tudo que entrou de cliente.")
+            c2.metric("Suporte (Novos)", suporte)
+            c3.metric("CS/Leads (Novos+Movidos)", leads)
             c4.metric("Agentes Ativos", df[df['Agente'] != "Sem Dono / Fila"]['Agente'].nunique())
             
-            if count_ignored_admin > 0:
-                st.caption(f"ℹ️ {count_ignored_admin} tickets de backoffice/manuais foram ocultados da contagem.")
+            # Auditoria discreta
+            if audit_admin > 0:
+                st.caption(f"ℹ️ {audit_admin} conversas internas (Admin/Backoffice) foram excluídas.")
             
             st.divider()
             
@@ -209,7 +219,6 @@ if btn_gerar:
             g1, g2 = st.columns(2)
             with g1:
                 st.subheader("📅 Entradas por Dia")
-                # Agrupa pela data real
                 vol_dia = df.groupby('DataIso').size().reset_index(name='Qtd')
                 fig_dia = px.bar(vol_dia, x='DataIso', y='Qtd', text='Qtd', color='Qtd', color_continuous_scale='Blues')
                 st.plotly_chart(fig_dia, use_container_width=True)
@@ -223,32 +232,30 @@ if btn_gerar:
                 st.plotly_chart(fig_ag, use_container_width=True)
 
             st.divider()
-            with st.expander("🔎 Ver Lista Detalhada", expanded=True):
+            with st.expander("🔎 Ver Lista de Clientes (Inbound)", expanded=True):
                 st.data_editor(
                     df.sort_values(by=['DataIso', 'Tipo']),
                     column_config={
                         "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir Conversa"),
-                        "Tipo": st.column_config.TextColumn("Status", width="medium"),
-                        "DataIso": None # Oculta coluna técnica
+                        "Tipo": st.column_config.TextColumn("Caixa/Origem", width="medium"),
+                        "DataIso": None
                     },
                     use_container_width=True, 
                     hide_index=True
                 )
         else:
             st.warning("Nenhuma conversa de cliente encontrada nos critérios.")
-            st.write(f"(Tickets ignorados por serem Backoffice/Admin: {count_ignored_admin})")
+            st.write(f"(Tickets ignorados por serem Admin: {audit_admin})")
 
     with tab_csat_view:
         if lista_csat:
             stats = {}
             detalhes_csat = []
             
-            # Processamento rápido CSAT
             time_pos, time_neu, time_neg = 0, 0, 0
             for c in lista_csat:
                 aid = str(c.get('admin_assignee_id'))
                 nota = c['conversation_rating']['rating']
-                # Stats Agente
                 if aid not in stats: stats[aid] = {'pos':0, 'neu':0, 'neg':0, 'total':0}
                 stats[aid]['total'] += 1
                 
@@ -260,7 +267,6 @@ if btn_gerar:
                 else: 
                     stats[aid]['neg'] += 1; time_neg += 1; label_nota="😡 Negativa"
                 
-                # Lista Detalhada
                 detalhes_csat.append({
                     "Data": datetime.fromtimestamp(c['conversation_rating']['created_at'], tz=FUSO_BR).strftime("%d/%m %H:%M"),
                     "Agente": admins.get(aid, "Desconhecido"),
@@ -270,7 +276,6 @@ if btn_gerar:
                     "Link": f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c['id']}"
                 })
 
-            # KPIs
             total_csat = time_pos + time_neu + time_neg
             if total_csat > 0:
                 csat_real = (time_pos / total_csat) * 100
