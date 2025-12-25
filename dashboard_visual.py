@@ -5,11 +5,19 @@ import time
 import re
 from datetime import datetime, timezone, timedelta
 
-# --- CONFIGURAÇÕES ---
+# --- Configs da Página ---
 st.set_page_config(page_title="Monitor Operacional", page_icon="🚀", layout="wide")
 
-TOKEN = st.secrets["INTERCOM_TOKEN"]
-APP_ID = st.secrets["INTERCOM_APP_ID"]
+# Tenta pegar as chaves do arquivo secrets (pra rodar na nuvem)
+# Se não achar (rodando local), usa o que estiver hardcoded no except.
+try:
+    TOKEN = st.secrets["INTERCOM_TOKEN"]
+    APP_ID = st.secrets["INTERCOM_APP_ID"]
+except:
+    TOKEN = "SEU_TOKEN_AQUI"
+    APP_ID = "SEU_APP_ID_AQUI"
+
+# ID do time e metas
 TEAM_ID = 2975006
 META_AGENTES = 4
 
@@ -19,9 +27,10 @@ headers = {
     "Content-Type": "application/json"
 }
 
-# --- FUNÇÕES ---
+# --- Funções de Busca (API Intercom) ---
 
 def get_admin_details():
+    # Pega a lista de admins pra saber Nome e Status (Away/Online)
     try:
         url = "https://api.intercom.io/admins"
         response = requests.get(url, headers=headers)
@@ -33,9 +42,10 @@ def get_admin_details():
                     'is_away': admin.get('away_mode_enabled', False)
                 }
         return dados
-    except: return {}
+    except: return {} # Se der erro, retorna vazio pra não quebrar o painel
 
 def get_team_members(team_id):
+    # Descobre quem faz parte do time específico (TEAM_ID)
     try:
         url = f"https://api.intercom.io/teams/{team_id}"
         response = requests.get(url, headers=headers)
@@ -45,6 +55,7 @@ def get_team_members(team_id):
     except: return []
 
 def count_conversations(admin_id, state):
+    # Conta quantos tickets estão em um estado específico (open, snoozed, etc) pra um agente
     try:
         url = "https://api.intercom.io/conversations/search"
         payload = {
@@ -63,6 +74,7 @@ def count_conversations(admin_id, state):
     except: return 0
 
 def get_team_queue_details(team_id):
+    # Pega os detalhes da fila (tickets sem dono atribuído ao time)
     try:
         url = "https://api.intercom.io/conversations/search"
         payload = {
@@ -79,12 +91,14 @@ def get_team_queue_details(team_id):
         detalhes_fila = []
         if response.status_code == 200:
             for conv in response.json().get('conversations', []):
+                # Garante que realmente não tem ninguém cuidando (admin_assignee_id é None)
                 if conv.get('admin_assignee_id') is None:
                     detalhes_fila.append({'id': conv['id']})
         return detalhes_fila
     except: return []
 
 def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
+    # Essa aqui é pesada: calcula volume total do período e volume recente (30min)
     try:
         url = "https://api.intercom.io/conversations/search"
         ts_corte_recente = int(time.time()) - (minutos_recente * 60)
@@ -97,7 +111,7 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 150}
+            "pagination": {"per_page": 150} # Pega até 150 pra não ficar lento demais
         }
         
         response = requests.post(url, json=payload, headers=headers)
@@ -110,15 +124,22 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
             conversas = response.json().get('conversations', [])
             total_periodo = len(conversas)
             for conv in conversas:
+                # Se tiver dono usa o ID, se não joga pra "FILA"
                 aid = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
+                
+                # Incrementa estatística geral
                 stats_periodo[aid] = stats_periodo.get(aid, 0) + 1
+                
+                # Se for recente (últimos 30min), incrementa estatística recente
                 if conv['created_at'] > ts_corte_recente:
                     stats_30min[aid] = stats_30min.get(aid, 0) + 1
                     total_recente += 1
+                    
         return total_periodo, total_recente, stats_periodo, stats_30min
     except: return 0, 0, {}, {}
 
 def get_latest_conversations(team_id, ts_inicio, limit=10):
+    # Pega as últimas X conversas pra mostrar na tabela lateral
     try:
         url = "https://api.intercom.io/conversations/search"
         payload = {
@@ -129,7 +150,7 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "sort": { "field": "created_at", "order": "descending" },
+            "sort": { "field": "created_at", "order": "descending" }, # Do mais novo pro mais velho
             "pagination": {"per_page": limit}
         }
         response = requests.post(url, json=payload, headers=headers)
@@ -138,10 +159,10 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
         return []
     except: return []
 
-# --- INTERFACE ---
+# --- Interface Visual (Streamlit) ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
 
-# --- SELETOR DE PERÍODO ---
+# Seletor pra alternar entre visão do dia ou visão de 48h (pra segunda-feira de manhã é útil)
 col_filtro, _ = st.columns([1, 3])
 with col_filtro:
     periodo_selecionado = st.radio(
@@ -152,11 +173,12 @@ with col_filtro:
 
 st.markdown("---")
 
+# Placeholder: é aqui que a mágica da atualização acontece sem duplicar componentes
 placeholder = st.empty()
 fuso_br = timezone(timedelta(hours=-3))
 
 with placeholder.container():
-    # Definição do Timestamp de Início
+    # Calcula o timestamp inicial baseado no filtro
     now = datetime.now(fuso_br)
     
     if "Hoje" in periodo_selecionado:
@@ -166,7 +188,8 @@ with placeholder.container():
         ts_inicio = int((now - timedelta(hours=48)).timestamp())
         texto_volume = "Volume (48h / 30min)"
 
-    # Coleta de Dados
+    # --- Coleta de Dados ---
+    # Chama todas as funções lá de cima
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
@@ -176,8 +199,10 @@ with placeholder.container():
     online = 0
     tabela = []
     
+    # Monta a tabela de performance por agente
     for mid in ids_time:
         sid = str(mid)
+        # Se não achar o nome, usa o ID mesmo e assume que tá away
         info = admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
         
         if not info['is_away']: online += 1
@@ -186,6 +211,7 @@ with placeholder.container():
         abertos = count_conversations(mid, 'open')
         pausados = count_conversations(mid, 'snoozed')
         
+        # Regrinhas visuais de alerta
         alerta = "⚠️" if abertos >= 5 else ""
         raio = "⚡" if stats_rec.get(sid, 0) >= 3 else ""
         
@@ -198,14 +224,14 @@ with placeholder.container():
             "Pausados": pausados
         })
     
-    # Cards Principais
+    # --- Cards de Métricas ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
     c2.metric(texto_volume, f"{vol_periodo} / {vol_rec}")
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(fuso_br).strftime("%H:%M:%S"))
     
-    # Alerta de Fila
+    # Se tiver fila, grita na tela!
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -220,7 +246,7 @@ with placeholder.container():
 
     st.markdown("---")
 
-    # Tabelas de Dados
+    # --- Área das Tabelas ---
     c_left, c_right = st.columns([2, 1])
 
     with c_left:
@@ -244,10 +270,12 @@ with placeholder.container():
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
+            # Tenta pegar o Assunto, se não tiver pega o corpo da mensagem
             subject = conv.get('source', {}).get('subject', '')
             if not subject:
                 body = conv.get('source', {}).get('body', '')
                 clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
+                
                 if not clean_body and ('<img' in body or '<figure' in body):
                     subject = "📷 [Imagem/Anexo]"
                 elif not clean_body:
@@ -265,6 +293,7 @@ with placeholder.container():
                 "Link": link
             })
         
+        # Mostra a tabela lateral se tiver dados
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
@@ -288,6 +317,6 @@ with placeholder.container():
         * ⚡ **Alta Demanda:** Agente recebeu 3+ tickets em 30min.
         """)
 
+# Loop de refresh: dorme 60s e recarrega a página inteira
 time.sleep(60)
 st.rerun()
-
