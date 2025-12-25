@@ -25,7 +25,7 @@ headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 FUSO_BR = timezone(timedelta(hours=-3)) 
 
 # ==========================================
-# 1. FUNÇÕES DE COLETA
+# 1. FUNÇÕES DE COLETA E MAPEAMENTO
 # ==========================================
 
 def get_admin_names():
@@ -33,6 +33,23 @@ def get_admin_names():
         r = requests.get("https://api.intercom.io/admins", headers=headers)
         return {a['id']: a['name'] for a in r.json().get('admins', [])} if r.status_code == 200 else {}
     except: return {}
+
+def get_team_members_map():
+    """
+    Retorna um dicionário mapeando ID_AGENTE -> ID_TIME.
+    Ex: {'12345': 2975006, '67890': 1972225}
+    Isso serve para saber de qual time é o agente, caso o ticket esteja sem time.
+    """
+    mapa = {}
+    for tid in TARGET_TEAMS:
+        try:
+            r = requests.get(f"https://api.intercom.io/teams/{tid}", headers=headers)
+            if r.status_code == 200:
+                admin_ids = r.json().get('admin_ids', [])
+                for aid in admin_ids:
+                    mapa[str(aid)] = tid
+        except: pass
+    return mapa
 
 def fetch_search_results(payload, progress_bar, label):
     url = "https://api.intercom.io/conversations/search"
@@ -64,7 +81,7 @@ def fetch_search_results(payload, progress_bar, label):
 # ==========================================
 
 st.title("📈 Relatório Unificado de Suporte")
-st.markdown("Visão focada em **Novas Entradas de Clientes (Inbound)** com análise de **Tags** e **Qualidade**.")
+st.markdown("Visão focada em **Inbound (Clientes)** com atribuição correta de **Agentes/Times**.")
 
 with st.sidebar:
     st.header("⚙️ Configuração")
@@ -81,7 +98,7 @@ with st.sidebar:
     st.caption("🔗 **Acesso Rápido:**")
     st.markdown("🚀 [Painel Tempo Real (Operacional)](https://dashboardvisualpy.streamlit.app)")
     st.markdown("⭐ [Painel Focado em CSAT](https://dashboardcsatpy.streamlit.app)")
-    st.info("ℹ️ Excluindo tickets internos (Admin).")
+    st.info("ℹ️ Filtro API: source.delivered_as = customer_initiated")
 
 if btn_gerar:
     # Datas
@@ -94,58 +111,83 @@ if btn_gerar:
     dt_end = datetime.combine(d_fim, dt_time.max).replace(tzinfo=FUSO_BR)
     ts_start, ts_end = int(dt_start.timestamp()), int(dt_end.timestamp())
 
-    progresso = st.progress(0, text="Conectando API...")
-    admins = get_admin_names()
+    progresso = st.progress(0, text="Mapeando Agentes e Times...")
     
+    # 1. Mapeamento Prévio (Vital para corrigir a atribuição)
+    admins_names = get_admin_names()
+    agent_team_map = get_team_members_map() # Sabe quem é de qual time
+    
+    # Lista de IDs de agentes para incluir na busca (caso o ticket esteja sem time)
+    agentes_ids = list(agent_team_map.keys())
+
     # ------------------------------------------------------------------
-    # ESTRATÉGIA: Filtro DIRETO NA API (customer_initiated)
+    # ESTRATÉGIA DE BUSCA HÍBRIDA
+    # Busca por Time OU por Agente desses times
+    # + Filtro de Cliente (Inbound)
     # ------------------------------------------------------------------
+    
+    # Critério de "Pertencimento": Ou está na caixa do time, OU está com um agente do time
+    time_or_agent_filter = [
+        {"field": "team_assignee_id", "operator": "IN", "value": TARGET_TEAMS}
+    ]
+    if agentes_ids:
+        time_or_agent_filter.append({"field": "admin_assignee_id", "operator": "IN", "value": agentes_ids})
+
     query_unified = {
         "query": {
             "operator": "AND",
             "value": [
                 {"field": "updated_at", "operator": ">", "value": ts_start},
                 {"field": "updated_at", "operator": "<", "value": ts_end},
-                {"field": "team_assignee_id", "operator": "IN", "value": TARGET_TEAMS},
-                {"field": "source.delivered_as", "operator": "=", "value": "customer_initiated"} 
+                {"field": "source.delivered_as", "operator": "=", "value": "customer_initiated"},
+                {
+                    "operator": "OR",
+                    "value": time_or_agent_filter
+                }
             ]
         },
         "pagination": {"per_page": 150}
     }
     
-    raw_data = fetch_search_results(query_unified, progresso, "🔎 Buscando Conversas de Clientes")
+    raw_data = fetch_search_results(query_unified, progresso, "🔎 Buscando Conversas...")
     
-    progresso.progress(1.0, text="Classificando dados...")
+    progresso.progress(1.0, text="Classificando e calculando...")
     time.sleep(0.5)
     progresso.empty()
 
     # --- PROCESSAMENTO ---
     lista_inbound = []
     lista_csat = []
-    todas_tags = [] # Lista para acumular as tags
-    
-    count_out_date_support = 0 
+    todas_tags = []
     
     for c in raw_data:
-        # Dados
         c_created = c.get('created_at', 0)
         c_updated = c.get('updated_at', 0)
+        
+        # Identificação Inteligente do Time
+        # 1. Tenta pegar o time direto do ticket
         team_id = int(c.get('team_assignee_id', 0) or 0)
         
-        # --- 1. LÓGICA DE VOLUME ---
+        # 2. Se não tiver time (0), tenta descobrir pelo Agente (admin_assignee_id)
+        # Isso resolve o problema de tickets atribuídos direto para "Gilson"
+        admin_id_str = str(c.get('admin_assignee_id', ''))
+        if team_id == 0 and admin_id_str in agent_team_map:
+            team_id = agent_team_map[admin_id_str]
+
+        # --- LÓGICA DE NEGÓCIO POR CAIXA ---
         is_valid_volume = False
         tipo_entrada = ""
 
-        # CAIXA SUPORTE (2975006) -> Apenas Novos
+        # CAIXA SUPORTE
         if team_id == ID_SUPORTE:
+            # Só conta como volume se foi CRIADO no período
             if ts_start <= c_created <= ts_end:
                 is_valid_volume = True
                 tipo_entrada = "Inbound (Suporte)"
-            else:
-                count_out_date_support += 1
 
-        # CAIXA CS/LEADS (1972225) -> Novos OU Movidos
+        # CAIXA CS/LEADS
         elif team_id == ID_CS_LEADS:
+            # Conta se foi CRIADO ou MOVIDO (Updated) no período
             is_valid_volume = True
             if ts_start <= c_created <= ts_end:
                 tipo_entrada = "Inbound (Lead Novo)"
@@ -155,12 +197,11 @@ if btn_gerar:
         if is_valid_volume:
             dt_criacao = datetime.fromtimestamp(c_created, tz=FUSO_BR)
             aid = c.get('admin_assignee_id')
-            nome_agente = admins.get(str(aid), "Sem Dono / Fila") if aid else "Sem Dono / Fila"
+            nome_agente = admins_names.get(str(aid), "Sem Dono / Fila") if aid else "Sem Dono / Fila"
             
-            # Coleta Tags
             tags_obj = c.get('tags', {}).get('tags', [])
             nomes_tags = [t['name'] for t in tags_obj]
-            todas_tags.extend(nomes_tags) # Acumula para o gráfico
+            todas_tags.extend(nomes_tags)
             
             link_url = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c['id']}"
             
@@ -174,7 +215,7 @@ if btn_gerar:
                 "ID": c['id']
             })
 
-        # --- 2. LÓGICA DE CSAT ---
+        # --- CSAT (Independente de Volume) ---
         rating_obj = c.get('conversation_rating', {})
         if rating_obj and rating_obj.get('rating'):
             r_created = rating_obj.get('created_at', 0)
@@ -184,9 +225,7 @@ if btn_gerar:
     # --- VISUALIZAÇÃO ---
     tab_vol, tab_csat_view = st.tabs(["📊 Volume & Tags", "⭐ Qualidade (CSAT)"])
 
-    # ==========================================
-    # ABA 1: VOLUME E TAGS
-    # ==========================================
+    # ABA 1: VOLUME
     with tab_vol:
         df = pd.DataFrame(lista_inbound)
         
@@ -196,14 +235,14 @@ if btn_gerar:
             leads = len(df[df['Tipo'].str.contains("Lead") | df['Tipo'].str.contains("Movido")])
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("📬 Total Recebido", total, help="Soma de Inbound User + Lead.")
+            c1.metric("📬 Total Inbound (Clientes)", total)
             c2.metric("Suporte (2975006)", suporte)
             c3.metric("CS / Leads (1972225)", leads)
             c4.metric("Agentes Ativos", df[df['Agente'] != "Sem Dono / Fila"]['Agente'].nunique())
             
             st.divider()
             
-            # Gráficos Linha 1
+            # Gráficos
             g1, g2 = st.columns(2)
             with g1:
                 st.subheader("📅 Entradas por Dia")
@@ -222,53 +261,43 @@ if btn_gerar:
 
             st.divider()
             
-            # --- NOVO: GRÁFICO DE TAGS ---
+            # Tags
             st.subheader("🏷️ Top Assuntos (Tags)")
             if todas_tags:
                 contagem_tags = Counter(todas_tags)
                 df_tags = pd.DataFrame(contagem_tags.items(), columns=['Tag', 'Qtd']).sort_values('Qtd', ascending=False).head(15)
-                fig_tags = px.bar(
-                    df_tags, x='Qtd', y='Tag', orientation='h', 
-                    text='Qtd', color='Qtd', color_continuous_scale='Viridis'
-                )
+                fig_tags = px.bar(df_tags, x='Qtd', y='Tag', orientation='h', text='Qtd', color='Qtd', color_continuous_scale='Viridis')
                 fig_tags.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_tags, use_container_width=True)
             else:
-                st.info("Nenhuma tag identificada nos tickets deste período.")
+                st.info("Nenhuma tag identificada.")
 
             st.divider()
             
-            # --- TABELA COM FILTROS ---
-            st.subheader("🔎 Detalhamento das Conversas")
+            # Tabela Detalhada com Filtros
+            st.subheader("🔎 Lista de Conversas")
             
-            # Filtro de Agente
-            agentes_disponiveis = df['Agente'].unique()
-            filtro_agente = st.multiselect("Filtrar por Agente:", options=agentes_disponiveis, placeholder="Selecione um ou mais agentes...")
+            agentes_disp = df['Agente'].unique()
+            f_agente = st.multiselect("Filtrar Agente:", agentes_disp)
             
-            # Aplica filtro
-            df_exibicao = df.copy()
-            if filtro_agente:
-                df_exibicao = df_exibicao[df_exibicao['Agente'].isin(filtro_agente)]
+            df_show = df.copy()
+            if f_agente:
+                df_show = df_show[df_show['Agente'].isin(f_agente)]
             
-            st.caption(f"Exibindo {len(df_exibicao)} conversas.")
+            st.caption(f"Exibindo {len(df_show)} registros.")
             st.data_editor(
-                df_exibicao.sort_values(by=['DataIso', 'Tipo']),
+                df_show.sort_values(by=['DataIso', 'Tipo']),
                 column_config={
-                    "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir Conversa"),
+                    "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir"),
                     "Tipo": st.column_config.TextColumn("Origem", width="medium"),
                     "DataIso": None
                 },
-                use_container_width=True, 
-                hide_index=True
+                use_container_width=True, hide_index=True
             )
         else:
             st.warning("Nenhuma conversa encontrada.")
-            if count_out_date_support > 0:
-                st.caption(f"ℹ️ {count_out_date_support} conversas antigas de suporte receberam mensagens, mas não contam como 'Novas'.")
 
-    # ==========================================
     # ABA 2: CSAT
-    # ==========================================
     with tab_csat_view:
         if lista_csat:
             stats = {}
@@ -292,7 +321,7 @@ if btn_gerar:
                 
                 detalhes_csat.append({
                     "Data": datetime.fromtimestamp(c['conversation_rating']['created_at'], tz=FUSO_BR).strftime("%d/%m %H:%M"),
-                    "Agente": admins.get(aid, "Desconhecido"),
+                    "Agente": admins_names.get(aid, "Desconhecido"),
                     "Nota": nota,
                     "Tipo": label_nota,
                     "Comentário": c['conversation_rating'].get('remark', '-'),
@@ -313,27 +342,20 @@ if btn_gerar:
                 
                 st.divider()
                 
-                # --- TABELA CSAT COM FILTROS ---
-                st.subheader("🔎 Avaliações Detalhadas")
-                
+                # Tabela CSAT com Filtros
+                st.subheader("🔎 Detalhes das Avaliações")
                 df_csat = pd.DataFrame(detalhes_csat)
                 
-                # Filtros
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    filtro_agente_csat = st.multiselect("Filtrar Agente:", df_csat['Agente'].unique(), key="f_agente_csat")
-                with col_f2:
-                    filtro_tipo_csat = st.multiselect("Filtrar Nota:", df_csat['Tipo'].unique(), key="f_tipo_csat")
+                fc1, fc2 = st.columns(2)
+                with fc1: f_ag_csat = st.multiselect("Filtrar Agente:", df_csat['Agente'].unique(), key="f_csat_ag")
+                with fc2: f_tp_csat = st.multiselect("Filtrar Nota:", df_csat['Tipo'].unique(), key="f_csat_tp")
                 
-                # Aplica
-                df_view_csat = df_csat.copy()
-                if filtro_agente_csat:
-                    df_view_csat = df_view_csat[df_view_csat['Agente'].isin(filtro_agente_csat)]
-                if filtro_tipo_csat:
-                    df_view_csat = df_view_csat[df_view_csat['Tipo'].isin(filtro_tipo_csat)]
+                df_show_csat = df_csat.copy()
+                if f_ag_csat: df_show_csat = df_show_csat[df_show_csat['Agente'].isin(f_ag_csat)]
+                if f_tp_csat: df_show_csat = df_show_csat[df_show_csat['Tipo'].isin(f_tp_csat)]
                 
                 st.data_editor(
-                    df_view_csat,
+                    df_show_csat,
                     column_config={
                         "Link": st.column_config.LinkColumn("Ver", display_text="Abrir"),
                         "Nota": st.column_config.NumberColumn("Nota", format="%d ⭐")
