@@ -17,14 +17,14 @@ except:
     TOKEN = "SEU_TOKEN_AQUI"
     APP_ID = "SEU_APP_ID_AQUI"
 
-# LISTA DE TIMES
+# LISTA DE TIMES (Incluindo Suporte e Customer Success/Leads)
 TEAM_IDS = [2975006, 1972225]
 
 headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 FUSO_BR = timezone(timedelta(hours=-3)) 
 
 # ==========================================
-# 1. FUNÇÕES DE COLETA (SEPARADAS PARA PRECISÃO)
+# 1. FUNÇÕES DE COLETA (CORRIGIDAS)
 # ==========================================
 
 def get_admin_names():
@@ -34,7 +34,6 @@ def get_admin_names():
     except: return {}
 
 # --- Busca de VOLUME ---
-# Regra: Tickets CRIADOS no período (independente de quando terminaram)
 def fetch_volume_data(start_ts, end_ts, progress_bar):
     url = "https://api.intercom.io/conversations/search"
     todas_conversas = []
@@ -59,10 +58,16 @@ def fetch_volume_data(start_ts, end_ts, progress_bar):
         total_time = data.get('total_count', 0)
         conversas_time = data.get('conversations', [])
         
+        # Se tiver dados, faz a paginação
         if total_time > 0:
+            # Loop de Paginação
             while data.get('pages', {}).get('next'):
                 baixados = len(conversas_time)
-                progress_bar.progress(0, text=f"📥 Volume (Time {t_id}): {baixados} de {total_time}...")
+                
+                # --- CORREÇÃO DA BARRA AZUL ---
+                # Calcula a porcentagem real (0.0 a 1.0)
+                percentual = min(baixados / total_time, 1.0)
+                progress_bar.progress(percentual, text=f"📥 Baixando Time {t_id}... ({baixados} de {total_time})")
                 
                 payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
                 r = requests.post(url, json=payload, headers=headers)
@@ -76,13 +81,11 @@ def fetch_volume_data(start_ts, end_ts, progress_bar):
     return todas_conversas
 
 # --- Busca de CSAT ---
-# Regra: Tickets AVALIADOS no período (mesmo que tenham sido criados meses atrás)
 def fetch_csat_data(start_ts, end_ts, progress_bar):
     url = "https://api.intercom.io/conversations/search"
     todas_conversas = []
     
     for i, t_id in enumerate(TEAM_IDS):
-        # Buscamos por updated_at porque a avaliação é uma atualização
         payload = {
             "query": {
                 "operator": "AND",
@@ -105,7 +108,10 @@ def fetch_csat_data(start_ts, end_ts, progress_bar):
         if total_time > 0:
             while data.get('pages', {}).get('next'):
                 baixados = len(conversas_time)
-                progress_bar.progress(0, text=f"⭐ CSAT (Time {t_id}): {baixados} de {total_time}...")
+                
+                # --- CORREÇÃO DA BARRA AZUL ---
+                percentual = min(baixados / total_time, 1.0)
+                progress_bar.progress(percentual, text=f"⭐ Avaliações Time {t_id}... ({baixados} de {total_time})")
                 
                 payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
                 r = requests.post(url, json=payload, headers=headers)
@@ -179,12 +185,16 @@ if btn_gerar:
             outbound_count = 0 
             
             for c in raw_volume:
-                # Filtro Inbound: Ignora conversas iniciadas pelo Admin
+                # --- FILTRO INBOUND/OUTBOUND ---
+                # Verifica quem iniciou a conversa: 'user', 'lead' ou 'admin'.
                 source_author = c.get('source', {}).get('author', {}).get('type')
+                
+                # Se foi 'admin' (agente), é Outbound -> Ignora na contagem de Recebidos
                 if source_author == 'admin':
                     outbound_count += 1
                     continue 
                 
+                # Processamento normal para 'user' e 'lead'
                 dt_criacao = datetime.fromtimestamp(c['created_at'], tz=FUSO_BR)
                 aid = c.get('admin_assignee_id')
                 nome_agente = admins.get(str(aid), "Sem Dono / Fila") if aid else "Sem Dono / Fila"
@@ -213,7 +223,7 @@ if btn_gerar:
                 media_dia = total / qtd_dias if qtd_dias > 0 else 0
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Tickets Recebidos (Inbound)", total)
+                c1.metric("Tickets Recebidos (Inbound)", total, help="Inclui Usuários e Leads. Exclui conversas iniciadas por agentes.")
                 c2.metric("Média por Dia", f"{media_dia:.1f}")
                 c3.metric("Agentes Ativos", df_vol[df_vol['Agente'] != "Sem Dono / Fila"]['Agente'].nunique())
                 
@@ -222,7 +232,7 @@ if btn_gerar:
                 
                 st.divider()
 
-                # GRÁFICOS
+                # GRÁFICOS LINHA 1
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     st.subheader("📅 Volume por Dia")
@@ -240,6 +250,7 @@ if btn_gerar:
                 
                 st.divider()
 
+                # GRÁFICOS LINHA 2
                 c_tag, c_agente = st.columns(2)
                 with c_tag:
                     st.subheader("🏷️ Top Tags")
@@ -289,7 +300,6 @@ if btn_gerar:
                 nota = rating_obj.get('rating')
                 if nota is None: continue
                 
-                # AQUI É O PULO DO GATO: Filtra pela data da NOTA, não do ticket
                 data_nota = rating_obj.get('created_at')
                 if not data_nota: continue
                 
