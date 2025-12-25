@@ -17,38 +17,79 @@ except:
     TOKEN = "SEU_TOKEN_AQUI"
     APP_ID = "SEU_APP_ID_AQUI"
 
-# LISTA DE TIMES
+# IDs dos Times (Suporte, Customer Success, Pré-Vendas, etc.)
+# Adicione aqui todos os times que deseja monitorar
 TEAM_IDS = [2975006, 1972225]
 
 headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 FUSO_BR = timezone(timedelta(hours=-3)) 
 
 # ==========================================
-# 1. FUNÇÕES DE COLETA (OTIMIZADA E CORRIGIDA)
+# 1. FUNÇÕES DE SUPORTE
 # ==========================================
 
 def get_admin_names():
+    # Pega lista de nomes dos agentes
     try:
         r = requests.get("https://api.intercom.io/admins", headers=headers)
         return {a['id']: a['name'] for a in r.json().get('admins', [])} if r.status_code == 200 else {}
     except: return {}
 
-# --- Busca Unificada (Pega TUDO que mexeu no período) ---
+def get_team_members(team_ids):
+    # Descobre quem são os agentes de cada time para buscar tickets atribuídos diretamente a eles
+    member_ids = []
+    try:
+        for tid in team_ids:
+            r = requests.get(f"https://api.intercom.io/teams/{tid}", headers=headers)
+            if r.status_code == 200:
+                member_ids.extend(r.json().get('admin_ids', []))
+        return list(set(member_ids)) # Remove duplicados
+    except: return []
+
+# ==========================================
+# 2. FUNÇÃO DE COLETA (BLINDADA)
+# ==========================================
+
 def fetch_unified_data(start_ts, end_ts, progress_bar):
     url = "https://api.intercom.io/conversations/search"
-    todas_conversas = []
+    todas_conversas = {} # Usando Dict para evitar duplicatas automaticamente (ID como chave)
     
-    total_steps = len(TEAM_IDS)
+    # Passo 1: Descobrir quem são os agentes desses times
+    # Isso é vital para achar tickets que estão com o Gilson mas sem o ID do time
+    team_members = get_team_members(TEAM_IDS)
     
-    for i, t_id in enumerate(TEAM_IDS):
-        # Busca por updated_at para garantir que pegamos tickets movidos recentemente
+    # Vamos fazer buscas separadas para garantir que nada escape
+    # Estratégias de busca:
+    # A. Tickets atribuídos aos TIMES (caixa geral)
+    # B. Tickets atribuídos aos AGENTES DESSES TIMES (caixa pessoal)
+    
+    search_queries = [
+        # Query A: Pelo ID do Time
+        {
+            "field": "team_assignee_id", 
+            "operator": "IN", 
+            "value": TEAM_IDS 
+        },
+        # Query B: Pelos IDs dos Agentes (se houver agentes mapeados)
+        {
+            "field": "admin_assignee_id", 
+            "operator": "IN", 
+            "value": team_members
+        }
+    ] if team_members else [{"field": "team_assignee_id", "operator": "IN", "value": TEAM_IDS}]
+
+    total_steps = len(search_queries)
+    
+    for idx, criterio in enumerate(search_queries):
+        tipo_busca = "Times" if criterio['field'] == 'team_assignee_id' else "Agentes"
+        
         payload = {
             "query": {
                 "operator": "AND",
                 "value": [
                     {"field": "updated_at", "operator": ">", "value": start_ts},
                     {"field": "updated_at", "operator": "<", "value": end_ts},
-                    {"field": "team_assignee_id", "operator": "=", "value": t_id}
+                    criterio # Injeta o critério (Time ou Agente)
                 ]
             },
             "pagination": {"per_page": 150}
@@ -58,44 +99,39 @@ def fetch_unified_data(start_ts, end_ts, progress_bar):
         if r.status_code != 200: continue
         
         data = r.json()
-        total_time = data.get('total_count', 0)
-        conversas_time = data.get('conversations', [])
+        total_api = data.get('total_count', 0)
+        lista_api = data.get('conversations', [])
         
-        # --- CORREÇÃO DA BARRA AZUL ---
-        # Atualiza a barra JÁ na primeira leva, para não ficar travada em 0 se tiver poucos itens
-        base_progress = i / total_steps
-        chunk_progress = 1.0 / total_steps
-        
-        current_len = len(conversas_time)
-        factor = min(current_len / total_time, 1.0) if total_time > 0 else 1.0
-        
-        real_percent = base_progress + (chunk_progress * factor * 0.9) # 0.9 pra não travar no 100% antes da hora
-        progress_bar.progress(real_percent, text=f"📥 Baixando Time {t_id}... ({current_len} de {total_time})")
+        # Adiciona no dicionário global (remove duplicatas pois chave é o ID)
+        for c in lista_api:
+            todas_conversas[c['id']] = c
 
-        if total_time > 0:
-            while data.get('pages', {}).get('next'):
-                payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
-                r = requests.post(url, json=payload, headers=headers)
-                
-                if r.status_code == 200:
-                    data = r.json()
-                    novos_dados = data.get('conversations', [])
-                    conversas_time.extend(novos_dados)
-                    
-                    # Atualiza barra dentro do loop
-                    current_len = len(conversas_time)
-                    factor = min(current_len / total_time, 1.0)
-                    real_percent = base_progress + (chunk_progress * factor * 0.9)
-                    progress_bar.progress(real_percent, text=f"📥 Baixando Time {t_id}... ({current_len} de {total_time})")
-                else:
-                    break
+        # Barra de Progresso Visual
+        baixados_nesta_etapa = len(lista_api)
         
-        todas_conversas.extend(conversas_time)
+        # Paginação
+        while data.get('pages', {}).get('next'):
+            # Atualiza barra
+            progresso_atual = (idx / total_steps) + ((baixados_nesta_etapa / total_api) * (1/total_steps))
+            progress_bar.progress(min(progresso_atual, 0.99), text=f"🔎 Varrendo {tipo_busca}... ({len(todas_conversas)} encontrados)")
             
-    return todas_conversas
+            payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
+            r = requests.post(url, json=payload, headers=headers)
+            
+            if r.status_code == 200:
+                data = r.json()
+                novos = data.get('conversations', [])
+                baixados_nesta_etapa += len(novos)
+                for c in novos:
+                    todas_conversas[c['id']] = c
+            else:
+                break
+                
+    progress_bar.progress(1.0, text=f"✅ Concluído! {len(todas_conversas)} tickets processados.")
+    return list(todas_conversas.values())
 
 # ==========================================
-# 2. INTERFACE
+# 3. INTERFACE
 # ==========================================
 
 st.title("📈 Relatório Unificado de Suporte")
@@ -116,9 +152,10 @@ with st.sidebar:
     st.caption("🔗 **Acesso Rápido:**")
     st.markdown("🚀 [Painel Tempo Real (Operacional)](https://dashboardvisualpy.streamlit.app)")
     st.markdown("⭐ [Painel Focado em CSAT](https://dashboardcsatpy.streamlit.app)")
-    st.info(f"ℹ️ **Conexão:** {len(TEAM_IDS)} Equipes monitoradas.")
+    st.info(f"ℹ️ **Monitorando:** {len(TEAM_IDS)} Times e seus Agentes.")
 
 if btn_gerar:
+    # Ajuste de Datas
     ts_start, ts_end = 0, 0
     if isinstance(periodo, tuple):
         d_inicio = periodo[0]
@@ -131,23 +168,22 @@ if btn_gerar:
     ts_start = int(dt_start.timestamp())
     ts_end = int(dt_end.timestamp())
 
-    progresso = st.progress(0, text="Iniciando conexão...")
+    progresso = st.progress(0, text="Iniciando varredura completa...")
     admins = get_admin_names()
     
-    # Busca TUDO (Updated At) para pegar os leads movidos
+    # BUSCA TURBINADA (Times + Agentes)
     raw_data = fetch_unified_data(ts_start, ts_end, progresso)
     
-    progresso.progress(1.0, text="Processando dados...")
     time.sleep(0.5)
     progresso.empty()
 
-    # --- SEPARAÇÃO INTELIGENTE DOS DADOS ---
+    # --- PROCESSAMENTO ---
     data_volume = []
     data_csat = []
     outbound_count = 0
     
     for c in raw_data:
-        # Filtro de Outbound (Agente iniciou)
+        # Filtro de Outbound
         source_author = c.get('source', {}).get('author', {}).get('type')
         if source_author == 'admin':
             outbound_count += 1
@@ -156,20 +192,16 @@ if btn_gerar:
         c_created = c.get('created_at', 0)
         c_updated = c.get('updated_at', 0)
         
-        # --- LÓGICA DE VOLUME HÍBRIDA ---
-        # 1. É Novo? (Criado no período)
+        # Regra de Volume: Novo ou Movido Recentemente
         is_new = ts_start <= c_created <= ts_end
-        
-        # 2. É um Lead Movido? (Criado ANTES, mas mexido AGORA e é Lead/User)
-        # Isso pega os casos da caixa 1972225 que vieram de pré-vendas
+        # Movido = Criado antes, mas atualizado agora
         is_moved = (c_created < ts_start) and (ts_start <= c_updated <= ts_end)
         
         if is_new or is_moved:
-            # Marca o tipo para mostrar na tabela
             c['custom_status_time'] = "🆕 Novo" if is_new else "🔄 Movido/Antigo"
             data_volume.append(c)
 
-        # --- LÓGICA DE CSAT ---
+        # Regra de CSAT
         rating = c.get('conversation_rating', {})
         if rating and rating.get('rating'):
             r_created = rating.get('created_at', 0)
@@ -201,7 +233,7 @@ if btn_gerar:
                     "DataIso": dt_criacao.date(),
                     "Hora": dt_criacao.hour,
                     "Data": dt_criacao.strftime("%d/%m %H:%M"),
-                    "Status Tempo": c.get('custom_status_time', '-'),
+                    "Tipo": c.get('custom_status_time', '-'),
                     "Agente": nome_agente,
                     "Tags": ", ".join(nomes_tags),
                     "Link": link_url,
@@ -211,13 +243,13 @@ if btn_gerar:
             df_vol = pd.DataFrame(lista_vol)
             
             total = len(df_vol)
-            novos_reais = len(df_vol[df_vol['Status Tempo'] == "🆕 Novo"])
-            movidos = len(df_vol[df_vol['Status Tempo'] == "🔄 Movido/Antigo"])
+            novos_reais = len(df_vol[df_vol['Tipo'] == "🆕 Novo"])
+            movidos = len(df_vol[df_vol['Tipo'] == "🔄 Movido/Antigo"])
             
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Volume Total na Caixa", total, help="Soma de novos + trazidos de outras caixas")
-            c2.metric("🆕 Novos (Inbound)", novos_reais, help="Criados neste período")
-            c3.metric("🔄 Movidos/Antigos", movidos, help="Criados antes, mas ativos neste período (ex: Leads)")
+            c1.metric("Volume Total (Atendidos)", total, help="Novos + Leads Antigos trabalhados")
+            c2.metric("🆕 Novos Leads", novos_reais)
+            c3.metric("🔄 Movidos/Recuperados", movidos)
             c4.metric("Agentes Ativos", df_vol[df_vol['Agente'] != "Sem Dono / Fila"]['Agente'].nunique())
             
             st.divider()
@@ -225,7 +257,6 @@ if btn_gerar:
             col_g1, col_g2 = st.columns(2)
             with col_g1:
                 st.subheader("📅 Volume por Dia")
-                # Agrupa por data real de criação (para ver quando nasceram)
                 vol_por_dia = df_vol.groupby('DataIso').size().reset_index(name='Tickets')
                 vol_por_dia['Data Formatada'] = vol_por_dia['DataIso'].apply(lambda x: x.strftime("%d/%m"))
                 fig_dias = px.bar(vol_por_dia, x='Data Formatada', y='Tickets', text='Tickets', color='Tickets', color_continuous_scale='Blues')
@@ -263,10 +294,10 @@ if btn_gerar:
             st.divider()
             with st.expander("🔎 Ver Tabela Detalhada (Novos e Movidos)", expanded=True):
                 st.data_editor(
-                    df_vol.sort_values(by=['DataIso', 'Hora'])[['Data', 'Status Tempo', 'Agente', 'Tags', 'Link']],
+                    df_vol.sort_values(by=['DataIso', 'Hora'])[['Data', 'Tipo', 'Agente', 'Tags', 'Link']],
                     column_config={
                         "Link": st.column_config.LinkColumn("Abrir", display_text="Acessar"),
-                        "Status Tempo": st.column_config.TextColumn("Tipo", help="Novo = Criado no período. Movido = Veio de outra caixa/Lead antigo.")
+                        "Tipo": st.column_config.TextColumn("Status", width="small")
                     },
                     use_container_width=True, hide_index=True
                 )
