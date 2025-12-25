@@ -368,8 +368,8 @@ if btn_gerar:
                         "Nota": st.column_config.NumberColumn("Nota", format="%d ⭐")
                     }, use_container_width=True, hide_index=True
                 )
-        else:
-            st.warning("Nenhuma avaliação encontrada.")
+           else:
+                st.warning("Nenhuma avaliação encontrada.")
         else:
             st.warning("Nenhum dado bruto de CSAT retornado.")
 
