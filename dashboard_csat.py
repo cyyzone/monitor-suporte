@@ -7,14 +7,17 @@ from datetime import datetime, timezone, timedelta, time as dt_time
 # --- Configs básicas pra rodar ---
 st.set_page_config(page_title="Painel de Qualidade (CSAT)", page_icon="⭐", layout="wide")
 
-# Tenta pegar o token dos secrets. Se der ruim, usa o hardcoded.
+# Tenta pegar as chaves. Se der ruim, usa o hardcoded.
 try:
     TOKEN = st.secrets["INTERCOM_TOKEN"]
+    APP_ID = st.secrets["INTERCOM_APP_ID"]
 except:
     TOKEN = "SEU_TOKEN_AQUI"
+    APP_ID = "SEU_APP_ID_AQUI"
 
 TEAM_ID = 2975006
 headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
+FUSO_BR = timezone(timedelta(hours=-3))
 
 # --- Funções que buscam os dados ---
 
@@ -28,8 +31,7 @@ def get_admin_names():
 def fetch_csat_data(start_ts, end_ts, progress_bar, status_text):
     url = "https://api.intercom.io/conversations/search"
     
-    # O pulo do gato aqui: busco por 'updated_at'. 
-    # Assim garanto que pego tickets velhos que receberam nota agora.
+    # Busca por 'updated_at' para pegar tickets avaliados recentemente
     payload = {
         "query": {
             "operator": "AND",
@@ -44,7 +46,6 @@ def fetch_csat_data(start_ts, end_ts, progress_bar, status_text):
     
     todas_conversas = []
     
-    # Faço a primeira chamada só pra ver o tamanho da lista (total_count)
     r = requests.post(url, json=payload, headers=headers)
     if r.status_code != 200:
         return []
@@ -53,15 +54,13 @@ def fetch_csat_data(start_ts, end_ts, progress_bar, status_text):
     total_registros = data.get('total_count', 0)
     todas_conversas.extend(data.get('conversations', []))
     
-    # Se não tem nada, já aviso e saio
     if total_registros == 0:
         progress_bar.progress(100, text="Nenhum registro encontrado.")
         return []
 
-    # Loop pra ir paginando (o Intercom entrega de 150 em 150)
+    # Loop de paginação
     pages_processed = 1
     while data.get('pages', {}).get('next'):
-        # Atualiza a barrinha pro usuário ver que tá rodando
         percentual = min(len(todas_conversas) / total_registros, 0.95)
         progress_bar.progress(percentual, text=f"Carregando dados... ({len(todas_conversas)} de {total_registros})")
         
@@ -78,45 +77,58 @@ def fetch_csat_data(start_ts, end_ts, progress_bar, status_text):
     progress_bar.progress(1.0, text="Processamento concluído.")
     return todas_conversas
 
-def process_stats(conversas, start_ts, end_ts):
+def process_stats(conversas, start_ts, end_ts, admins_map):
     stats = {}
+    details_list = [] # Lista para guardar os detalhes linha a linha
+    
     time_pos, time_neu, time_neg = 0, 0, 0
     
     for c in conversas:
         aid = str(c.get('admin_assignee_id'))
         
-        # Se não tem dono ou não tem nota, nem perde tempo
         if not aid or not c.get('conversation_rating'): continue
         
         rating_obj = c['conversation_rating']
         nota = rating_obj.get('rating')
         if nota is None: continue
         
-        # Filtro importante: A nota TEM que ter sido dada dentro do período selecionado.
         data_nota = rating_obj.get('created_at')
         if not data_nota: continue
         
         if not (start_ts <= data_nota <= end_ts):
             continue
 
-        # Cria o dicionário do agente se for a primeira vez que ele aparece
+        # --- Estatísticas Agregadas (Cards) ---
         if aid not in stats: stats[aid] = {'pos':0, 'neu':0, 'neg':0, 'total':0}
-        
         stats[aid]['total'] += 1
         
-        # Classifica a nota (1-5)
+        label_nota = ""
         if nota >= 4:
-            stats[aid]['pos'] += 1
-            time_pos += 1
+            stats[aid]['pos'] += 1; time_pos += 1; label_nota = "😍 Positiva"
         elif nota == 3:
-            stats[aid]['neu'] += 1
-            time_neu += 1
+            stats[aid]['neu'] += 1; time_neu += 1; label_nota = "😐 Neutra"
         else:
-            stats[aid]['neg'] += 1
-            time_neg += 1
+            stats[aid]['neg'] += 1; time_neg += 1; label_nota = "😡 Negativa"
+
+        # --- Detalhamento (Tabela Nova) ---
+        nome_agente = admins_map.get(aid, "Desconhecido")
+        dt_evento = datetime.fromtimestamp(data_nota, tz=FUSO_BR).strftime("%d/%m %H:%M")
+        comentario = rating_obj.get('remark', '-') # Pega o comentário se houver
+        link_url = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c['id']}"
+        
+        details_list.append({
+            "Data": dt_evento,
+            "Agente": nome_agente,
+            "Nota": nota,
+            "Tipo": label_nota,
+            "Comentário": comentario,
+            "Link": link_url
+        })
             
     total_time = time_pos + time_neu + time_neg
-    return stats, {'pos': time_pos, 'neu': time_neu, 'neg': time_neg, 'total': total_time}
+    
+    # Retorna: Stats por agente, Stats do Time, Lista Detalhada
+    return stats, {'pos': time_pos, 'neu': time_neu, 'neg': time_neg, 'total': total_time}, details_list
 
 # --- Interface Visual ---
 st.title("⭐ Painel de Qualidade (CSAT)")
@@ -127,65 +139,54 @@ with st.form("filtro_csat"):
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        # Seletor de data
         periodo = st.date_input(
             "📅 Período de Análise:",
-            value=(datetime.now().replace(day=1), datetime.now()), # Padrão: inicio do mês até hoje
+            value=(datetime.now().replace(day=1), datetime.now()), 
             format="DD/MM/YYYY"
         )
     
     with col2:
         st.write("") 
         st.write("")
-        # Botão de ação
         submit_btn = st.form_submit_button("🔄 Atualizar Dados", type="primary", use_container_width=True)
 
-# Se clicou no botão, executa a lógica
 if submit_btn:
-    # 1. Arruma os timestamps (garante o dia inteiro, de 00:00 até 23:59)
+    # 1. Arruma os timestamps
     ts_start, ts_end = 0, 0
     if isinstance(periodo, tuple):
         if len(periodo) == 2:
             ts_start = int(datetime.combine(periodo[0], dt_time.min).timestamp())
             ts_end = int(datetime.combine(periodo[1], dt_time.max).timestamp())
         elif len(periodo) == 1:
-            # Caso selecione apenas um dia
             ts_start = int(datetime.combine(periodo[0], dt_time.min).timestamp())
             ts_end = int(datetime.combine(periodo[0], dt_time.max).timestamp())
     else:
-        # Fallback de segurança
         ts_start = int(datetime.combine(periodo, dt_time.min).timestamp())
         ts_end = int(datetime.combine(periodo, dt_time.max).timestamp())
         
-    # 2. Chama as funções de busca
+    # 2. Busca Dados
     status_holder = st.empty()
     progress_bar = st.progress(0, text="Conectando ao servidor...")
     
     admins = get_admin_names()
     raw_conversations = fetch_csat_data(ts_start, ts_end, progress_bar, status_holder)
     
-    # Limpa a barra
     time.sleep(0.5)
     progress_bar.empty()
     
-    # 3. Calcula as estatísticas
-    stats_agentes, stats_time = process_stats(raw_conversations, ts_start, ts_end)
+    # 3. Processa
+    # Agora recebemos 3 retornos: stats_agentes, stats_time e lista_detalhada
+    stats_agentes, stats_time, lista_detalhada = process_stats(raw_conversations, ts_start, ts_end, admins)
     
-    # --- Monta os Indicadores (Cards) ---
-    
-    # CSAT Geral Real (Considerando as neutras)
+    # --- Cards ---
     total_time_csat = stats_time['total']
     csat_real_time = (stats_time['pos'] / total_time_csat * 100) if total_time_csat > 0 else 0
-
-    # CSAT Ajustado do Time (Sem as neutras)
     total_valid_time = stats_time['pos'] + stats_time['neg']
     csat_adjusted_time = (stats_time['pos'] / total_valid_time * 100) if total_valid_time > 0 else 0
 
     st.markdown("---")
     
-    # 5 Colunas para os indicadores
     c1, c2, c3, c4, c5 = st.columns(5)
-    
     c1.metric("CSAT Geral (Real)", f"{csat_real_time:.1f}%", f"{total_time_csat} avaliações")
     c2.metric("CSAT Ajustado (Time)", f"{csat_adjusted_time:.1f}%", "Exclui neutras") 
     c3.metric("😍 Positivas (4-5)", stats_time['pos'])
@@ -194,16 +195,12 @@ if submit_btn:
     
     st.markdown("---")
 
-    # Monta a Tabela Detalhada
+    # --- Tabela Resumo (Agentes) ---
     tabela = []
     for aid, s in stats_agentes.items():
         nome = admins.get(aid, "Desconhecido")
-        
-        # Cálculo 1: CSAT Ajustado (Agente) - Ignora Neutras
         valido = s['pos'] + s['neg']
         csat_ajustado = (s['pos'] / valido * 100) if valido > 0 else 0
-        
-        # Cálculo 2: CSAT Real (Agente) - Considera tudo
         total_agente = s['total']
         csat_real = (s['pos'] / total_agente * 100) if total_agente > 0 else 0
         
@@ -212,28 +209,62 @@ if submit_btn:
             "CSAT (Ajustado)": f"{csat_ajustado:.1f}%",
             "CSAT (Real)": f"{csat_real:.1f}%", 
             "Avaliações": s['total'],
-            "😍": s['pos'],
-            "😐": s['neu'],
-            "😡": s['neg']
+            "😍": s['pos'], "😐": s['neu'], "😡": s['neg']
         })
 
     if tabela:
         df = pd.DataFrame(tabela).sort_values("Avaliações", ascending=False)
-        
-        # Organiza as colunas na ordem de visualização
         cols_order = ["Agente", "CSAT (Ajustado)", "CSAT (Real)", "Avaliações", "😍", "😐", "😡"]
-        
-        st.subheader("Detalhamento por Agente")
+        st.subheader("Resumo por Agente")
         st.dataframe(df, use_container_width=True, hide_index=True, column_order=cols_order)
     else:
         st.warning("Nenhuma avaliação encontrada para o período selecionado.")
+
+    st.divider()
+
+    # --- NOVA SEÇÃO: Detalhamento com Filtros ---
+    st.subheader("🔎 Detalhamento das Avaliações")
+
+    if lista_detalhada:
+        df_detalhe = pd.DataFrame(lista_detalhada)
+
+        # Filtro de Agente
+        todos_agentes = df_detalhe['Agente'].unique()
+        agentes_selecionados = st.multiselect(
+            "Filtrar por Agente:", 
+            options=todos_agentes,
+            placeholder="Selecione um ou mais agentes..."
+        )
+
+        # Aplica o filtro se houver seleção
+        if agentes_selecionados:
+            df_detalhe = df_detalhe[df_detalhe['Agente'].isin(agentes_selecionados)]
+
+        st.caption(f"Exibindo {len(df_detalhe)} avaliações.")
         
-    st.caption("""
-    ℹ️ **Legenda:**
-    * **CSAT Ajustado:** Considera apenas avaliações Positivas e Negativas (exclui Neutras do cálculo).
-    * **CSAT Real:** Representa o percentual de clientes satisfeitos em relação ao total de atendimentos (inclui Neutras).
-    """)
+        # Exibe com link clicável
+        st.data_editor(
+            df_detalhe,
+            column_config={
+                "Link": st.column_config.LinkColumn(
+                    "Ver Conversa", 
+                    display_text="Abrir Ticket"
+                ),
+                "Nota": st.column_config.NumberColumn(
+                    "Nota",
+                    format="%d ⭐"
+                ),
+                "Comentário": st.column_config.TextColumn(
+                    "Comentário do Cliente",
+                    width="medium"
+                )
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+        st.info("Não há dados detalhados para exibir.")
 
 else:
-    # Mensagem de espera inicial
     st.info("👆 Selecione o período acima e clique em 'Atualizar Dados' para gerar o relatório.")
