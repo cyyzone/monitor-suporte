@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 # --- Configs da Página ---
-st.set_page_config(page_title="Ponto & Status", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="Ponto & Status (V4)", page_icon="🕵️", layout="wide")
 
 try:
     TOKEN = st.secrets["INTERCOM_TOKEN"]
