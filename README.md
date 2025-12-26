@@ -1,28 +1,50 @@
-# 📊 Monitor de Suporte - CS (Intercom)
+# 📊 Monitor de Suporte - Intercom
 
-Este projeto é uma suite de monitoramento para equipes de Customer Success, dividida em dois painéis estratégicos: **Operacional** (Tempo Real) e **Qualidade** (CSAT Analítico).
+Este projeto reúne painéis (dashboards) para monitorar a equipe de Customer Success (CS) e Suporte utilizando a API do Intercom.
 
-O objetivo é fornecer visibilidade imediata sobre a fila e produtividade, além de uma análise profunda da satisfação do cliente, consumindo a API do Intercom.
+O objetivo é ter uma visão clara do **tempo real** (operacional), da **qualidade** (CSAT) e da **jornada de trabalho** (Status) dos agentes.
 
-## 🚀 Módulos do Projeto
+## 🚀 Painéis Disponíveis
 
-O sistema foi separado em dois dashboards para garantir performance e foco:
+O sistema é dividido em módulos para facilitar o uso:
 
-### 1. 🚀 Dashboard Operacional (`dashboard_visual.py`)
-Focado na **velocidade**. É leve e atualiza automaticamente a cada 60 segundos. Ideal para ficar na TV da sala.
-* **Monitoramento de Fila:** Alerta visual crítico para clientes aguardando atendimento.
-* **Status em Tempo Real:** Quem está Online vs. Ausente (Away).
-* **Métricas de Fluxo:** Volume do dia e Volume recente (últimos 30 min) para identificar picos de demanda.
-* **Alertas de Sobrecarga:** Identifica agentes com muitos tickets abertos simultaneamente.
+### 1. ⚡ Monitor Operacional (`dashboard_visual.py`)
+Focado em **tempo real**. 
+* **Fila:** Mostra se há clientes aguardando atendimento.
+* **Status:** Quem está Online 🟢 ou Ausente 🔴 agora.
+* **Fluxo:** Volume de tickets do dia e dos últimos 30 minutos.
+* **Alertas:** Avisa se um agente está sobrecarregado (muitos tickets abertos).
 
-### 2. ⭐ Dashboard de Qualidade (`dashboard_csat.py`)
-Focado na **análise**. Processa o histórico completo do mês atual, buscando tickets antigos que receberam avaliação recente.
-* **CSAT Global (Time):** Cálculo padrão de mercado (considera avaliações Neutras).
-* **CSAT Individual (Ajustado):** Cálculo justo para o agente (ignora avaliações Neutras).
-* **Detalhamento:** Tabela com contagem de notas Positivas (4-5), Neutras (3) e Negativas (1-2).
-* **Busca Profunda:** Varre conversas atualizadas no mês para garantir que nenhuma nota seja perdida.
+### 2. ⭐ Qualidade e CSAT (`dashboard_csat.py`)
+Focado na **satisfação do cliente**.
+* **CSAT Real vs. Ajustado:** Compara a nota considerando ou ignorando avaliações neutras.
+* **Detalhamento:** Lista todas as avaliações com comentários e links diretos para os tickets.
+* **Filtros:** Permite filtrar por agente específico.
+
+### 3. 🕒 Ponto e Status (`dashboard_status.py`)
+Focado na **gestão de tempo** e pausas.
+* **Cálculo de Ausência:** Soma quanto tempo o agente ficou em modo "Away" (Ausente).
+* **Histórico:** Mostra os horários exatos de saída e retorno (mesmo se a pausa começou no dia anterior).
+* **Gráfico:** Visualização das horas de ausência por dia.
+
+### 4. 📈 Volume Unificado (`dashboard_volume.py`)
+Focado em **métricas de entrada**.
+* **Inbound:** Quantos tickets novos entraram (separando suporte geral de leads).
+* **Tags:** Quais os assuntos (tags) mais recorrentes.
 
 ---
+
+## 🛠️ Como Configurar e Rodar
+
+### Pré-requisitos
+* Python instalado.
+* Um **Token de Acesso** da API do Intercom.
+
+### 1. Instalação
+Baixe o projeto e instale as bibliotecas necessárias:
+
+```bash
+pip install -r requirements.txt
 
 ## 🛠️ Instalação e Configuração
 
