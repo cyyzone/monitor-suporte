@@ -42,7 +42,7 @@ def get_admin_details():
                     'is_away': admin.get('away_mode_enabled', False)
                 }
         return dados
-    except: return {} # Se der erro, retorna vazio pra não quebrar o painel
+    except: return {}
 
 def get_team_members(team_id):
     # Descobre quem faz parte do time específico (TEAM_ID)
@@ -98,7 +98,7 @@ def get_team_queue_details(team_id):
     except: return []
 
 def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
-    # Essa aqui é pesada: calcula volume total do período e volume recente (30min)
+    # ALTERADO: Agora retorna também a lista detalhada de tickets por agente
     try:
         url = "https://api.intercom.io/conversations/search"
         ts_corte_recente = int(time.time()) - (minutos_recente * 60)
@@ -111,12 +111,15 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
                     {"field": "team_assignee_id", "operator": "=", "value": team_id}
                 ]
             },
-            "pagination": {"per_page": 150} # Pega até 150 pra não ficar lento demais
+            "pagination": {"per_page": 150} # Limite de 150 conversas na busca
         }
         
         response = requests.post(url, json=payload, headers=headers)
         stats_periodo = {}
         stats_30min = {}
+        # NOVO: Dicionário para guardar a lista de links
+        detalhes_por_agente = {} 
+        
         total_periodo = 0
         total_recente = 0
         
@@ -130,13 +133,24 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
                 # Incrementa estatística geral
                 stats_periodo[aid] = stats_periodo.get(aid, 0) + 1
                 
+                # NOVO: Guarda os detalhes do ticket na lista do agente
+                if aid not in detalhes_por_agente:
+                    detalhes_por_agente[aid] = []
+                
+                detalhes_por_agente[aid].append({
+                    'id': conv['id'],
+                    'created_at': conv['created_at'],
+                    'link': f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{conv['id']}"
+                })
+                
                 # Se for recente (últimos 30min), incrementa estatística recente
                 if conv['created_at'] > ts_corte_recente:
                     stats_30min[aid] = stats_30min.get(aid, 0) + 1
                     total_recente += 1
                     
-        return total_periodo, total_recente, stats_periodo, stats_30min
-    except: return 0, 0, {}, {}
+        # Retorna agora 5 valores (o último é a lista detalhada)
+        return total_periodo, total_recente, stats_periodo, stats_30min, detalhes_por_agente
+    except: return 0, 0, {}, {}, {}
 
 def get_latest_conversations(team_id, ts_inicio, limit=10):
     # Pega as últimas X conversas pra mostrar na tabela lateral
@@ -162,7 +176,7 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
 # --- Interface Visual (Streamlit) ---
 st.title("🚀 Monitor Operacional (Tempo Real)")
 
-# Seletor pra alternar entre visão do dia ou visão de 48h (pra segunda-feira de manhã é útil)
+# Seletor pra alternar entre visão do dia ou visão de 48h
 col_filtro, _ = st.columns([1, 3])
 with col_filtro:
     periodo_selecionado = st.radio(
@@ -193,7 +207,10 @@ with placeholder.container():
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
-    vol_periodo, vol_rec, stats_periodo, stats_rec = get_daily_stats(TEAM_ID, ts_inicio)
+    
+    # ATENÇÃO: Agora recebemos 5 variáveis (detalhes_agente é a nova)
+    vol_periodo, vol_rec, stats_periodo, stats_rec, detalhes_agente = get_daily_stats(TEAM_ID, ts_inicio)
+    
     ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
     online = 0
@@ -257,6 +274,35 @@ with placeholder.container():
             hide_index=True,
             column_order=["Status", "Agente", "Abertos", "Volume Período", "Recente (30m)", "Pausados"]
         )
+        
+        # --- NOVO: Seção de Detalhes por Agente ---
+        st.markdown("---")
+        st.subheader("🕵️ Detalhe dos Tickets por Agente")
+        
+        if len(ids_time) > 0:
+            # Cria colunas para organizar os expanders (grid de 3 ou 4)
+            cols = st.columns(3) 
+            
+            for i, mid in enumerate(ids_time):
+                sid = str(mid)
+                nome = admins.get(sid, {}).get('name', 'Desconhecido')
+                # Pega a lista de tickets que salvamos na função
+                tickets = detalhes_agente.get(sid, [])
+                
+                # Distribui os cards nas colunas
+                with cols[i % 3]:
+                    with st.expander(f"{nome} ({len(tickets)})"):
+                        if not tickets:
+                            st.caption("Sem tickets no período.")
+                        else:
+                            # Ordena do mais recente para o mais antigo
+                            tickets_sorted = sorted(tickets, key=lambda x: x['created_at'], reverse=True)
+                            for t in tickets_sorted:
+                                hora = datetime.fromtimestamp(t['created_at'], tz=fuso_br).strftime('%H:%M')
+                                st.markdown(f"⏰ **{hora}** - [Abrir #{t['id']}]({t['link']})")
+        else:
+            st.info("Nenhum agente encontrado no time.")
+
 
     with c_right:
         st.subheader("Últimas Atribuições")
@@ -270,7 +316,7 @@ with placeholder.container():
             if adm_id:
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
-            # Tenta pegar o Assunto, se não tiver pega o corpo da mensagem
+            # Tenta pegar o Assunto
             subject = conv.get('source', {}).get('subject', '')
             if not subject:
                 body = conv.get('source', {}).get('body', '')
@@ -293,7 +339,6 @@ with placeholder.container():
                 "Link": link
             })
         
-        # Mostra a tabela lateral se tiver dados
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
@@ -320,3 +365,7 @@ with placeholder.container():
 # Loop de refresh: dorme 60s e recarrega a página inteira
 time.sleep(60)
 st.rerun()
+# Loop de refresh: dorme 60s e recarrega a página inteira
+time.sleep(60)
+st.rerun()
+
