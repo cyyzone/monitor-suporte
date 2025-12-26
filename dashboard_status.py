@@ -137,7 +137,9 @@ with st.form("form_periodo"):
     )
     btn = st.form_submit_button("Gerar Relatório")
 
+# --- LÓGICA DE PERSISTÊNCIA (SESSION STATE) ---
 if btn:
+    # 1. Busca os Dados
     if isinstance(datas, tuple):
         d_inicio = datas[0]
         d_fim = datas[1] if len(datas) > 1 else datas[0]
@@ -156,73 +158,88 @@ if btn:
     admins = get_admin_names()
     logs = fetch_activity_logs(ts_start, ts_end, progresso)
     
+    # 2. Processa e Salva no State
     if logs:
         df_detalhado, df_resumo = processar_ciclos(logs, admins, d_inicio)
-        
-        # --- LÓGICA DO GRÁFICO ---
-        if not df_detalhado.empty:
-            
-            st.divider()
-            
-            # 1. Filtro de Dias para o Gráfico
-            todas_datas = sorted(df_detalhado['Data'].unique())
-            st.subheader("📈 Análise Visual")
-            
-            # Multiselect para filtrar os dias
-            dias_selecionados = st.multiselect(
-                "Filtrar dias no gráfico:",
-                options=todas_datas,
-                default=todas_datas, # Já vem tudo selecionado por padrão
-                placeholder="Selecione os dias que deseja ver..."
-            )
-            
-            # Filtra o DF baseado na seleção
-            df_chart = df_detalhado[df_detalhado['Data'].isin(dias_selecionados)]
-            
-            if not df_chart.empty:
-                # Agrupa por Dia e Agente para somar as horas daquele dia
-                df_grouped = df_chart.groupby(['Data', 'Agente'])['Duração (h)'].sum().reset_index()
-                
-                # Cria o Gráfico de Barras
-                fig = px.bar(
-                    df_grouped, 
-                    x="Data", 
-                    y="Duração (h)", 
-                    color="Agente", 
-                    text="Duração (h)",
-                    title="Horas Totais de Ausência por Dia",
-                    barmode="group", # Barras lado a lado
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
-                fig.update_traces(texttemplate='%{text:.1f}h', textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Nenhum dado para os dias selecionados.")
-                
-            st.divider()
-
-        # --- ABAS DE TABELAS ---
-        tab1, tab2 = st.tabs(["⏱️ Resumo Total", "📝 Detalhe dos Ciclos"])
-        
-        with tab1:
-            if not df_resumo.empty:
-                st.dataframe(
-                    df_resumo.sort_values('Horas', ascending=False), 
-                    use_container_width=True, 
-                    hide_index=True,
-                    column_config={"Horas": st.column_config.NumberColumn("Total Horas", format="%.2f h")}
-                )
-            else:
-                st.warning("Nenhuma ausência contabilizada.")
-                
-        with tab2:
-            if not df_detalhado.empty:
-                st.dataframe(
-                    df_detalhado[['Agente', 'Data', 'Início', 'Fim', 'Duração (min)']], 
-                    use_container_width=True, 
-                    hide_index=True
-                )
-            else:
-                st.info("Sem dados detalhados.")
+        st.session_state['dados_status'] = {
+            'detalhado': df_detalhado,
+            'resumo': df_resumo
+        }
     else:
         st.error("Sem logs encontrados.")
+        if 'dados_status' in st.session_state:
+            del st.session_state['dados_status'] # Limpa se der erro
+
+# --- EXIBIÇÃO (Fora do if btn) ---
+if 'dados_status' in st.session_state:
+    dados = st.session_state['dados_status']
+    df_detalhado = dados['detalhado']
+    df_resumo = dados['resumo']
+    
+    # --- GRÁFICO ---
+    if not df_detalhado.empty:
+        st.divider()
+        
+        # 1. Filtro de Dias para o Gráfico (Agora funciona!)
+        todas_datas = sorted(df_detalhado['Data'].unique())
+        st.subheader("📈 Análise Visual")
+        
+        dias_selecionados = st.multiselect(
+            "Filtrar dias no gráfico:",
+            options=todas_datas,
+            default=todas_datas, 
+            placeholder="Selecione os dias..."
+        )
+        
+        # Filtra baseado na seleção
+        if dias_selecionados:
+            df_chart = df_detalhado[df_detalhado['Data'].isin(dias_selecionados)]
+        else:
+            df_chart = df_detalhado # Se desmarcar tudo, mostra tudo (ou nada, como preferir)
+        
+        if not df_chart.empty:
+            df_grouped = df_chart.groupby(['Data', 'Agente'])['Duração (h)'].sum().reset_index()
+            
+            fig = px.bar(
+                df_grouped, 
+                x="Data", 
+                y="Duração (h)", 
+                color="Agente", 
+                text="Duração (h)",
+                title="Horas Totais de Ausência por Dia",
+                barmode="group",
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig.update_traces(texttemplate='%{text:.1f}h', textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Nenhum dado para os dias selecionados.")
+            
+        st.divider()
+
+    # --- TABELAS ---
+    tab1, tab2 = st.tabs(["⏱️ Resumo Total", "📝 Detalhe dos Ciclos"])
+    
+    with tab1:
+        if not df_resumo.empty:
+            st.dataframe(
+                df_resumo.sort_values('Horas', ascending=False), 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={"Horas": st.column_config.NumberColumn("Total Horas", format="%.2f h")}
+            )
+        else:
+            st.warning("Nenhuma ausência contabilizada.")
+            
+    with tab2:
+        if not df_detalhado.empty:
+            st.dataframe(
+                df_detalhado[['Agente', 'Data', 'Início', 'Fim', 'Duração (min)']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("Sem dados detalhados.")
+
+elif not btn:
+    st.info("👆 Selecione o período e clique em 'Gerar Relatório'.")
