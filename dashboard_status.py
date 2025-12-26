@@ -1,10 +1,11 @@
 import streamlit as st
 import requests
 import pandas as pd
+import plotly.express as px
 from datetime import datetime, timedelta, timezone
 
 # --- Configs da Página ---
-st.set_page_config(page_title="Ponto & Status (V4)", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="Ponto & Status (Gráfico)", page_icon="📊", layout="wide")
 
 try:
     TOKEN = st.secrets["INTERCOM_TOKEN"]
@@ -34,10 +35,10 @@ def fetch_activity_logs(start_ts, end_ts, progress_bar):
     logs.extend(data.get('activity_logs', []))
     
     pages = 0
-    # Buffer de segurança (até 30 páginas para não demorar demais)
-    while data.get('pages', {}).get('next') and pages < 30:
+    # Buffer de segurança
+    while data.get('pages', {}).get('next') and pages < 40:
         pages += 1
-        progress_bar.progress(pages / 30, text=f"Baixando histórico (Página {pages})...")
+        progress_bar.progress(pages / 40, text=f"Baixando histórico (Página {pages})...")
         url_next = data['pages']['next']
         r = requests.get(url_next, headers=headers)
         if r.status_code == 200:
@@ -45,20 +46,18 @@ def fetch_activity_logs(start_ts, end_ts, progress_bar):
             logs.extend(data.get('activity_logs', []))
         else: break
             
-    progress_bar.progress(1.0, text="Analisando continuidade...")
+    progress_bar.progress(1.0, text="Processando dados...")
     return logs
 
 def processar_ciclos(logs, admin_map, data_inicio_filtro):
     eventos = []
     
-    # 1. Transforma JSON em Lista Organizada
+    # 1. Extração
     for log in logs:
         if log.get('activity_type') == 'admin_away_mode_change':
             aid = log.get('performed_by', {}).get('id')
             ts = log.get('created_at')
             metadata = log.get('metadata', {})
-            
-            # true = Ausente (SAIU), false = Online (VOLTOU)
             is_away = metadata.get('away_mode', False)
             
             eventos.append({
@@ -70,7 +69,6 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
     if not eventos: return pd.DataFrame(), pd.DataFrame()
     
     df_raw = pd.DataFrame(eventos)
-    # Ordena rigorosamente por Agente e Tempo
     df_raw = df_raw.sort_values(by=['Agente', 'Timestamp'])
     
     ciclos_fechados = []
@@ -85,36 +83,34 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
         tempo_acumulado_segundos = 0
         
         for index, row in logs_agente.iterrows():
-            # AÇÃO: FICOU AUSENTE
             if row['IsAway'] == True:
                 inicio_ausencia = row['Timestamp']
             
-            # AÇÃO: VOLTOU ONLINE
-            elif row['IsAway'] == False:
-                # Se encontrou um "Voltou", ele precisa ter um "Início" guardado (mesmo que seja de ontem)
-                if inicio_ausencia:
-                    fim_ausencia = row['Timestamp']
+            elif row['IsAway'] == False and inicio_ausencia:
+                fim_ausencia = row['Timestamp']
+                
+                # Data da volta (para agrupar no gráfico)
+                dt_volta_obj = datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR)
+                dt_volta_str = dt_volta_obj.strftime("%d/%m/%Y")
+                dt_volta_date = dt_volta_obj.date()
+                
+                # Filtro de Data (ignora ausências velhas)
+                if dt_volta_date >= data_inicio_filtro:
+                    duracao_seg = fim_ausencia - inicio_ausencia
+                    tempo_acumulado_segundos += duracao_seg
                     
-                    # --- FILTRO IMPORTANTE ---
-                    # Só mostramos se a volta aconteceu dentro do período selecionado
-                    # (Ou seja, ignora ausências antigas que já terminaram semana passada)
-                    dt_volta = datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR).date()
-                    
-                    if dt_volta >= data_inicio_filtro:
-                        duracao_seg = fim_ausencia - inicio_ausencia
-                        tempo_acumulado_segundos += duracao_seg
-                        
-                        # Adiciona na tabela de detalhes
-                        ciclos_fechados.append({
-                            "Agente": agente,
-                            "Início Ausência": datetime.fromtimestamp(inicio_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
-                            "Fim Ausência": datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
-                            "Duração": f"{round(duracao_seg/60, 0):.0f} min"
-                        })
-                    
-                    inicio_ausencia = None # Reseta o ciclo
+                    ciclos_fechados.append({
+                        "Agente": agente,
+                        "Data": dt_volta_str, # Usado no gráfico
+                        "Início": datetime.fromtimestamp(inicio_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
+                        "Fim": datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
+                        "Duração (min)": round(duracao_seg/60, 0),
+                        "Duração (h)": round(duracao_seg/3600, 2)
+                    })
+                
+                inicio_ausencia = None 
 
-        # Totais do Agente
+        # Totais Gerais
         if tempo_acumulado_segundos > 0:
             minutos = tempo_acumulado_segundos / 60
             resumo_horas[agente] = {
@@ -122,9 +118,7 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
                 "Minutos Totais": round(minutos, 0)
             }
 
-    # Formata DataFrames para exibição
     df_ciclos = pd.DataFrame(ciclos_fechados)
-    
     df_totais = pd.DataFrame.from_dict(resumo_horas, orient='index').reset_index()
     if not df_totais.empty:
         df_totais.columns = ['Agente', 'Horas', 'Minutos']
@@ -132,16 +126,16 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
     return df_ciclos, df_totais
 
 # --- Interface ---
-st.title("🕵️ Ponto & Status (Análise de Ciclo)")
-st.markdown("Identifica quando o agente **Saiu** (mesmo ontem) e quando **Voltou** (hoje).")
+st.title("📊 Gráfico de Ausências (Com Filtro)")
+st.markdown("Analise o tempo de ausência dia a dia e filtre conforme necessário.")
 
 with st.form("form_periodo"):
     datas = st.date_input(
-        "Selecione o dia para ver as voltas/ausências:",
-        value=(datetime.now(), datetime.now()),
+        "Selecione o Período Geral:",
+        value=(datetime.now() - timedelta(days=2), datetime.now()),
         format="DD/MM/YYYY"
     )
-    btn = st.form_submit_button("Calcular")
+    btn = st.form_submit_button("Gerar Relatório")
 
 if btn:
     if isinstance(datas, tuple):
@@ -150,8 +144,7 @@ if btn:
     else:
         d_inicio = d_fim = datas
 
-    # --- BUFFER DE SEGURANÇA (3 DIAS) ---
-    # Buscamos 3 dias para trás para pegar o "Início" que ficou pendente
+    # Buffer de 3 dias para pegar inícios pendentes
     buffer_dias = 3 
     dt_api_start = datetime.combine(d_inicio - timedelta(days=buffer_dias), datetime.min.time()).replace(tzinfo=FUSO_BR)
     dt_api_end = datetime.combine(d_fim, datetime.max.time()).replace(tzinfo=FUSO_BR)
@@ -159,16 +152,57 @@ if btn:
     ts_start = int(dt_api_start.timestamp())
     ts_end = int(dt_api_end.timestamp())
 
-    st.caption(f"🔎 Analisando histórico desde {dt_api_start.strftime('%d/%m')} para encontrar a origem das ausências...")
-    
-    progresso = st.progress(0, text="Conectando...")
+    progresso = st.progress(0, text="Conectando API...")
     admins = get_admin_names()
     logs = fetch_activity_logs(ts_start, ts_end, progresso)
     
     if logs:
         df_detalhado, df_resumo = processar_ciclos(logs, admins, d_inicio)
         
-        tab1, tab2 = st.tabs(["⏱️ Resumo Geral", "📝 Ciclos Detalhados (Início -> Fim)"])
+        # --- LÓGICA DO GRÁFICO ---
+        if not df_detalhado.empty:
+            
+            st.divider()
+            
+            # 1. Filtro de Dias para o Gráfico
+            todas_datas = sorted(df_detalhado['Data'].unique())
+            st.subheader("📈 Análise Visual")
+            
+            # Multiselect para filtrar os dias
+            dias_selecionados = st.multiselect(
+                "Filtrar dias no gráfico:",
+                options=todas_datas,
+                default=todas_datas, # Já vem tudo selecionado por padrão
+                placeholder="Selecione os dias que deseja ver..."
+            )
+            
+            # Filtra o DF baseado na seleção
+            df_chart = df_detalhado[df_detalhado['Data'].isin(dias_selecionados)]
+            
+            if not df_chart.empty:
+                # Agrupa por Dia e Agente para somar as horas daquele dia
+                df_grouped = df_chart.groupby(['Data', 'Agente'])['Duração (h)'].sum().reset_index()
+                
+                # Cria o Gráfico de Barras
+                fig = px.bar(
+                    df_grouped, 
+                    x="Data", 
+                    y="Duração (h)", 
+                    color="Agente", 
+                    text="Duração (h)",
+                    title="Horas Totais de Ausência por Dia",
+                    barmode="group", # Barras lado a lado
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig.update_traces(texttemplate='%{text:.1f}h', textposition='outside')
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Nenhum dado para os dias selecionados.")
+                
+            st.divider()
+
+        # --- ABAS DE TABELAS ---
+        tab1, tab2 = st.tabs(["⏱️ Resumo Total", "📝 Detalhe dos Ciclos"])
         
         with tab1:
             if not df_resumo.empty:
@@ -179,13 +213,12 @@ if btn:
                     column_config={"Horas": st.column_config.NumberColumn("Total Horas", format="%.2f h")}
                 )
             else:
-                st.warning("Nenhum ciclo de ausência fechado neste período.")
+                st.warning("Nenhuma ausência contabilizada.")
                 
         with tab2:
-            st.write("Aqui você vê exatamente que horas ele saiu (pode ser ontem) e que horas voltou (hoje).")
             if not df_detalhado.empty:
                 st.dataframe(
-                    df_detalhado, 
+                    df_detalhado[['Agente', 'Data', 'Início', 'Fim', 'Duração (min)']], 
                     use_container_width=True, 
                     hide_index=True
                 )
