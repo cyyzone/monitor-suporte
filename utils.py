@@ -9,7 +9,6 @@ def check_password():
         return False
 
     def password_entered():
-        """Callback quando o usuário digita a senha."""
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
@@ -26,7 +25,6 @@ def check_password():
         key="password"
     )
     
-    # Só mostra erro se a chave EXISTIR e for FALSE (usuário tentou e errou)
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("😕 Senha incorreta.")
 
