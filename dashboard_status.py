@@ -1,55 +1,54 @@
 import streamlit as st
-import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta, timezone
-from utils import check_password
+from utils import check_password, make_api_request
 
 # --- Configs da Página ---
 st.set_page_config(page_title="Ponto & Status (Dinâmico)", page_icon="📊", layout="wide")
 
-# 🔒 BLOQUEIO DE SEGURANÇA ------------------------
+# 🔒 BLOQUEIO DE SEGURANÇA
 if not check_password():
-    st.stop()  # Para a execução do script aqui se não tiver senha
-# -------------------------------------------------
+    st.stop()
 
-try:
-    TOKEN = st.secrets["INTERCOM_TOKEN"]
-except:
-    TOKEN = "SEU_TOKEN_AQUI"
-
-headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"}
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- Funções ---
+# --- Funções (Usando make_api_request) ---
 
 def get_admin_names():
-    try:
-        r = requests.get("https://api.intercom.io/admins", headers=headers)
-        return {a['id']: a['name'] for a in r.json().get('admins', [])} if r.status_code == 200 else {}
-    except: return {}
+    url = "https://api.intercom.io/admins"
+    data = make_api_request("GET", url)
+    if data:
+        return {a['id']: a['name'] for a in data.get('admins', [])}
+    return {}
 
 def fetch_activity_logs(start_ts, end_ts, progress_bar):
     url = "https://api.intercom.io/admins/activity_logs"
     params = { "created_at_after": start_ts, "created_at_before": end_ts }
     logs = []
     
-    r = requests.get(url, headers=headers, params=params)
-    if r.status_code != 200: return []
+    # 1. Primeira chamada segura
+    data = make_api_request("GET", url, params=params)
+    if not data: return []
     
-    data = r.json()
     logs.extend(data.get('activity_logs', []))
     
+    # 2. Paginação
     pages = 0
     while data.get('pages', {}).get('next') and pages < 40:
         pages += 1
         progress_bar.progress(pages / 40, text=f"Baixando histórico (Página {pages})...")
+        
         url_next = data['pages']['next']
-        r = requests.get(url_next, headers=headers)
-        if r.status_code == 200:
-            data = r.json()
+        # make_api_request já trata o token, então passamos só a URL se ela for completa,
+        # mas a API de log pagination geralmente devolve URL completa.
+        # Nesse caso, passamos params=None pois o cursor já está na URL.
+        data = make_api_request("GET", url_next)
+        
+        if data:
             logs.extend(data.get('activity_logs', []))
-        else: break
+        else: 
+            break
             
     progress_bar.progress(1.0, text="Processando dados...")
     return logs
@@ -70,7 +69,7 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
                 "IsAway": is_away
             })
             
-    if not eventos: return pd.DataFrame() # Retorna só o detalhado, resumo calculamos na hora
+    if not eventos: return pd.DataFrame() 
     
     df_raw = pd.DataFrame(eventos)
     df_raw = df_raw.sort_values(by=['Agente', 'Timestamp'])
@@ -90,18 +89,16 @@ def processar_ciclos(logs, admin_map, data_inicio_filtro):
             elif row['IsAway'] == False and inicio_ausencia:
                 fim_ausencia = row['Timestamp']
                 
-                # Data da volta
                 dt_volta_obj = datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR)
                 dt_volta_str = dt_volta_obj.strftime("%d/%m/%Y")
                 dt_volta_date = dt_volta_obj.date()
                 
-                # Filtro de Data (ignora ausências velhas)
                 if dt_volta_date >= data_inicio_filtro:
                     duracao_seg = fim_ausencia - inicio_ausencia
                     
                     ciclos_fechados.append({
                         "Agente": agente,
-                        "Data": dt_volta_str, # Essencial para o filtro
+                        "Data": dt_volta_str, 
                         "Início": datetime.fromtimestamp(inicio_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
                         "Fim": datetime.fromtimestamp(fim_ausencia, tz=FUSO_BR).strftime("%d/%m %H:%M"),
                         "Duração (min)": round(duracao_seg/60, 0),
@@ -125,7 +122,6 @@ with st.form("form_periodo"):
     )
     btn = st.form_submit_button("Buscar Dados")
 
-# --- LÓGICA DE DADOS ---
 if btn:
     if isinstance(datas, tuple):
         d_inicio = datas[0]
@@ -133,7 +129,6 @@ if btn:
     else:
         d_inicio = d_fim = datas
 
-    # Buffer de 3 dias
     buffer_dias = 3 
     dt_api_start = datetime.combine(d_inicio - timedelta(days=buffer_dias), datetime.min.time()).replace(tzinfo=FUSO_BR)
     dt_api_end = datetime.combine(d_fim, datetime.max.time()).replace(tzinfo=FUSO_BR)
@@ -146,7 +141,6 @@ if btn:
     logs = fetch_activity_logs(ts_start, ts_end, progresso)
     
     if logs:
-        # Processamos apenas a lista detalhada completa
         df_full = processar_ciclos(logs, admins, d_inicio)
         st.session_state['dados_status_v6'] = df_full
     else:
@@ -154,20 +148,18 @@ if btn:
         if 'dados_status_v6' in st.session_state:
             del st.session_state['dados_status_v6']
 
-# --- EXIBIÇÃO INTERATIVA ---
 if 'dados_status_v6' in st.session_state:
     df_full = st.session_state['dados_status_v6']
     
     if not df_full.empty:
         st.divider()
         
-        # --- 2. FILTRO GLOBAL ---
         todas_datas = sorted(df_full['Data'].unique())
         
         col_f1, col_f2 = st.columns([1, 3])
         with col_f1:
             st.markdown("### 🔍 Filtrar Dias")
-            st.caption("Selecione os dias para recalcular TUDO (Gráfico e Tabelas).")
+            st.caption("Selecione os dias para recalcular TUDO.")
             
         with col_f2:
             dias_selecionados = st.multiselect(
@@ -177,21 +169,16 @@ if 'dados_status_v6' in st.session_state:
                 placeholder="Selecione os dias..."
             )
         
-        # --- APLICANDO O FILTRO NA BASE ---
         if dias_selecionados:
             df_view = df_full[df_full['Data'].isin(dias_selecionados)]
         else:
-            df_view = df_full # Se tirar tudo, mostra tudo (ou poderia mostrar vazio)
+            df_view = df_full
 
         if not df_view.empty:
-            
-            # --- RECÁLCULO DO RESUMO (Baseado no filtro) ---
-            # Agrupa o DF filtrado para gerar os novos totais
             df_resumo_dinamico = df_view.groupby('Agente')['Duração (min)'].sum().reset_index()
             df_resumo_dinamico['Horas'] = round(df_resumo_dinamico['Duração (min)'] / 60, 2)
             df_resumo_dinamico = df_resumo_dinamico.sort_values('Horas', ascending=False)
             
-            # --- GRÁFICO ---
             df_grouped_chart = df_view.groupby(['Data', 'Agente'])['Duração (h)'].sum().reset_index()
             
             fig = px.bar(
@@ -209,11 +196,9 @@ if 'dados_status_v6' in st.session_state:
             
             st.divider()
 
-            # --- TABELAS ATUALIZADAS ---
-            tab1, tab2 = st.tabs(["⏱️ Resumo Total (Atualizado)", "📝 Detalhe dos Ciclos (Atualizado)"])
+            tab1, tab2 = st.tabs(["⏱️ Resumo Total", "📝 Detalhe dos Ciclos"])
             
             with tab1:
-                st.info(f"Mostrando totais para os dias: {', '.join(dias_selecionados)}")
                 st.dataframe(
                     df_resumo_dinamico[['Agente', 'Horas', 'Duração (min)']], 
                     use_container_width=True, 
@@ -234,7 +219,7 @@ if 'dados_status_v6' in st.session_state:
             st.warning("Nenhum dado para os dias selecionados.")
             
     else:
-        st.info("Nenhum ciclo de ausência encontrado no período baixado.")
+        st.info("Nenhum ciclo de ausência encontrado.")
 
 elif not btn:
     st.info("👆 Selecione o período e clique em 'Buscar Dados'.")
