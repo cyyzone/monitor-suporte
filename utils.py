@@ -31,7 +31,10 @@ def check_password():
     return False
 
 def make_api_request(method, url, json=None, params=None, max_retries=3):
-    """Faz chamadas API seguras com tentativa automática em caso de erro 429."""
+    """
+    Faz chamadas API seguras respeitando o Rate Limit do Intercom.
+    Usa o header 'X-RateLimit-Reset' para espera inteligente.
+    """
     token = st.secrets.get("INTERCOM_TOKEN", "")
     headers = {
         "Authorization": f"Bearer {token}",
@@ -48,15 +51,35 @@ def make_api_request(method, url, json=None, params=None, max_retries=3):
             
             if response.status_code == 200:
                 return response.json()
+            
             elif response.status_code == 429: # Rate Limit
-                wait = (2 ** attempt) + 1
-                st.toast(f"⏳ API cheia. Aguardando {wait}s...", icon="⚠️")
-                time.sleep(wait)
+                # Lógica Inteligente baseada na documentação do Intercom
+                reset_time = response.headers.get("X-RateLimit-Reset")
+                
+                if reset_time:
+                    try:
+                        wait_seconds = int(reset_time) - int(time.time()) + 1 # +1s de margem
+                    except ValueError:
+                        wait_seconds = (2 ** attempt) + 1
+                else:
+                    # Fallback se o header não vier
+                    wait_seconds = (2 ** attempt) + 1
+                
+                # Garante que não vamos esperar um tempo negativo
+                wait_seconds = max(1, wait_seconds)
+
+                st.toast(f"⏳ API cheia. Aguardando {wait_seconds}s para o reset...", icon="🛑")
+                time.sleep(wait_seconds)
                 continue
+            
             else:
+                # Log de erro para ajudar no debug (Melhoria de segurança)
+                print(f"Erro API {response.status_code}: {response.text}")
                 return None
-        except Exception:
+                
+        except Exception as e:
+            print(f"Erro de Conexão: {e}")
             return None
             
-    st.error("Falha na conexão com a API.")
+    st.error("Falha na conexão com a API após várias tentativas.")
     return None
