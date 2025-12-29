@@ -16,8 +16,6 @@ if not check_password():
 
 # 🔑 RECUPERAÇÃO DE SEGREDOS (SEGURA)
 try:
-    # O token é pego automaticamente dentro do make_api_request, 
-    # aqui pegamos só o APP_ID que é usado para gerar links
     APP_ID = st.secrets["INTERCOM_APP_ID"]
 except KeyError:
     st.error("❌ Erro: Configure 'INTERCOM_APP_ID' no arquivo .streamlit/secrets.toml")
@@ -139,7 +137,7 @@ if btn_gerar:
     time.sleep(0.5)
     progresso.empty()
 
-    # --- PROCESSAMENTO (Mantive sua lógica original) ---
+    # --- PROCESSAMENTO ---
     lista_inbound = []
     lista_csat = []
     todas_tags = []
@@ -192,6 +190,7 @@ if btn_gerar:
     # --- VISUALIZAÇÃO ---
     tab_vol, tab_csat_view = st.tabs(["📊 Volume & Tags", "⭐ Qualidade (CSAT)"])
 
+    # ABA 1: VOLUME
     with tab_vol:
         df = pd.DataFrame(lista_inbound)
         if not df.empty:
@@ -204,7 +203,7 @@ if btn_gerar:
             
             st.divider()
             
-            # Gráficos e Tabelas (Mantidos igual ao original)
+            # Gráficos
             g1, g2 = st.columns(2)
             with g1:
                 vol_dia = df.groupby('DataIso').size().reset_index(name='Qtd')
@@ -224,11 +223,79 @@ if btn_gerar:
         else:
             st.warning("Nenhuma conversa encontrada.")
 
+    # ABA 2: CSAT (AGORA COMPLETA)
     with tab_csat_view:
         if lista_csat:
-            # (Lógica do CSAT simplificada aqui para caber, mas você já tem ela pronta no outro arquivo)
-            st.info(f"Foram encontradas {len(lista_csat)} avaliações neste período.")
-            # ... copie a lógica de exibição do CSAT se precisar detalhar aqui ...
+            # Cálculo das estatísticas na hora
+            stats = {'pos': 0, 'neu': 0, 'neg': 0, 'total': 0}
+            detalhes_csat = []
+            
+            for c in lista_csat:
+                rating_obj = c['conversation_rating']
+                nota = rating_obj.get('rating')
+                aid = str(c.get('admin_assignee_id'))
+                
+                stats['total'] += 1
+                label_nota = ""
+                
+                if nota >= 4:
+                    stats['pos'] += 1
+                    label_nota = "😍 Positiva"
+                elif nota == 3:
+                    stats['neu'] += 1
+                    label_nota = "😐 Neutra"
+                else:
+                    stats['neg'] += 1
+                    label_nota = "😡 Negativa"
+                    
+                nome_agente = admins_names.get(aid, "Desconhecido")
+                dt_evento = datetime.fromtimestamp(rating_obj.get('created_at'), tz=FUSO_BR).strftime("%d/%m %H:%M")
+                
+                detalhes_csat.append({
+                    "Data": dt_evento,
+                    "Agente": nome_agente,
+                    "Nota": nota,
+                    "Tipo": label_nota,
+                    "Comentário": rating_obj.get('remark', '-'),
+                    "Link": f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c['id']}"
+                })
+            
+            # Exibição dos Cards
+            total_csat = stats['total']
+            csat_real = (stats['pos'] / total_csat * 100) if total_csat > 0 else 0
+            total_valid = stats['pos'] + stats['neg']
+            csat_adj = (stats['pos'] / total_valid * 100) if total_valid > 0 else 0
+            
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("CSAT Geral", f"{csat_real:.1f}%", f"{total_csat} avaliações")
+            k2.metric("CSAT Ajustado", f"{csat_adj:.1f}%", "Sem neutras")
+            k3.metric("😍 Positivas", stats['pos'])
+            k4.metric("😡 Negativas", stats['neg'])
+            
+            st.divider()
+            
+            # Exibição da Tabela
+            if detalhes_csat:
+                df_csat = pd.DataFrame(detalhes_csat)
+                st.subheader("🔎 Detalhes das Avaliações")
+                
+                # Filtro rápido de agente na tabela
+                agentes_csat = sorted(df_csat['Agente'].unique())
+                f_agente_csat = st.multiselect("Filtrar por Agente (CSAT):", agentes_csat)
+                
+                if f_agente_csat:
+                    df_csat = df_csat[df_csat['Agente'].isin(f_agente_csat)]
+                
+                st.data_editor(
+                    df_csat,
+                    column_config={
+                        "Link": st.column_config.LinkColumn("Ticket", display_text="Abrir"),
+                        "Nota": st.column_config.NumberColumn("Nota", format="%d ⭐"),
+                        "Comentário": st.column_config.TextColumn("Obs.", width="medium")
+                    },
+                    use_container_width=True, 
+                    hide_index=True
+                )
         else:
             st.info("Nenhuma avaliação (CSAT) no período.")
 
