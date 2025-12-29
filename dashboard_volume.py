@@ -5,10 +5,15 @@ import plotly.express as px
 import time
 from datetime import datetime, time as dt_time, timedelta, timezone
 from collections import Counter
+from utils import check_password
 
 # --- Configs da Página ---
 st.set_page_config(page_title="Relatório de Suporte (Unificado)", page_icon="📈", layout="wide")
 
+# 🔒 BLOQUEIO DE SEGURANÇA ------------------------
+if not check_password():
+    st.stop()  # Para a execução do script aqui se não tiver senha
+# -------------------------------------------------
 try:
     TOKEN = st.secrets["INTERCOM_TOKEN"]
     APP_ID = st.secrets["INTERCOM_APP_ID"]
