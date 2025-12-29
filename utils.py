@@ -4,8 +4,8 @@ def check_password():
     """
     Retorna `True` se o usuário tiver a senha correta.
     """
-    
-    # Se a senha não estiver configurada nos secrets, bloqueia por segurança
+
+    # Verifica se a senha foi configurada nos secrets
     if "APP_PASSWORD" not in st.secrets:
         st.error("ERRO: A senha da aplicação não foi configurada no secrets.toml")
         return False
@@ -18,13 +18,9 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    # Verifica se já está logado na sessão
-    if "password_correct" not in st.session_state:
-        # Primeira vez abrindo a página, inicializa como falso
-        st.session_state["password_correct"] = False
-
     # Se já estiver logado, libera o acesso
-    if st.session_state["password_correct"]:
+    # O .get(..., False) garante que se a chave não existir, ele assume Falso sem dar erro
+    if st.session_state.get("password_correct", False):
         return True
 
     # Se não estiver logado, mostra o campo de senha
@@ -35,6 +31,12 @@ def check_password():
         key="password"
     )
     
+    # Só mostramos o erro se a chave "password_correct" EXISTIR na memória.
+    # Isso significa que o usuário já tentou digitar a senha e o callback 'password_entered' rodou.
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 Senha incorreta.")
+
+    return False
     # Se a senha estiver errada (após tentativa), avisa
     if "password_correct" in st.session_state and st.session_state["password_correct"] is False:
         st.error("😕 Senha incorreta.")
