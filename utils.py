@@ -62,8 +62,3 @@ def make_api_request(method, url, json=None, params=None, max_retries=3):
             
     st.error("Falha na conexão com a API.")
     return None
-    # Se a senha estiver errada (após tentativa), avisa
-    if "password_correct" in st.session_state and st.session_state["password_correct"] is False:
-        st.error("😕 Senha incorreta.")
-
-    return False
