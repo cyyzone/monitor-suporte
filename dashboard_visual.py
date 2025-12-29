@@ -4,7 +4,6 @@ import time
 import re
 from datetime import datetime, timezone, timedelta
 
-# Importamos as funções de segurança e API do arquivo utils.py
 from utils import check_password, make_api_request
 
 # --- Configs da Página ---
@@ -189,7 +188,6 @@ def atualizar_painel():
         texto_volume = "Volume (48h / 30min)"
 
     # --- Coleta de Dados (Sem spinner visual) ---
-    # Removemos o "with st.spinner" para a atualização ser invisível
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
@@ -225,6 +223,14 @@ def atualizar_painel():
             "Pausados": pausados
         })
     
+    # --- ORDENAÇÃO AUTOMÁTICA (NOVIDADE AQUI) ---
+    # Passo 1: Ordena alfabeticamente pelo nome do Agente (para desempatar)
+    tabela = sorted(tabela, key=lambda x: x['Agente'])
+    
+    # Passo 2: Ordena pelo Status reverso (🟢 tem valor maior que 🔴 no código unicode)
+    # Isso garante que 🟢 venha primeiro, mantendo a ordem alfabética dentro de cada grupo.
+    tabela = sorted(tabela, key=lambda x: x['Status'], reverse=True)
+
     # --- Exibição dos Cards (Metrics) ---
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
@@ -232,7 +238,6 @@ def atualizar_painel():
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(FUSO_BR).strftime("%H:%M:%S"))
     
-    # Alerta Crítico de Fila
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -252,6 +257,7 @@ def atualizar_painel():
 
     with c_left:
         st.subheader("Performance da Equipe")
+        # A tabela já entra ordenada aqui
         st.dataframe(
             pd.DataFrame(tabela), 
             use_container_width=True, 
@@ -259,13 +265,23 @@ def atualizar_painel():
             column_order=["Status", "Agente", "Abertos", "Volume Período", "Recente (30m)", "Pausados"]
         )
         
-        # Seção de Detalhes (Expansores)
+        # Seção de Detalhes
         st.markdown("---")
         st.subheader("🕵️ Detalhe dos Tickets por Agente")
         
         if len(ids_time) > 0:
             cols = st.columns(3) 
-            for i, mid in enumerate(ids_time):
+            # Reordena os IDs para os detalhes também seguirem a ordem da tabela
+            # Criamos um mapa para saber a ordem certa baseada na tabela ordenada
+            ordem_nomes = [t['Agente'] for t in tabela]
+            
+            # Ordenamos ids_time baseado nessa lista de nomes
+            ids_time_ordenados = sorted(ids_time, key=lambda mid: 
+                ordem_nomes.index(admins.get(str(mid), {}).get('name', '')) 
+                if admins.get(str(mid), {}).get('name', '') in ordem_nomes else 999
+            )
+
+            for i, mid in enumerate(ids_time_ordenados):
                 sid = str(mid)
                 nome = admins.get(sid, {}).get('name', 'Desconhecido')
                 tickets = detalhes_agente.get(sid, [])
@@ -315,7 +331,6 @@ def atualizar_painel():
                 "Link": link
             })
         
-        # Usamos um key dinâmico com int(time.time()) para forçar a tabela a atualizar se os dados mudarem
         if hist_dados:
             st.data_editor(
                 pd.DataFrame(hist_dados),
