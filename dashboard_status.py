@@ -11,9 +11,10 @@ st.set_page_config(page_title="Ponto & Status (Dinâmico)", page_icon="📊", la
 if not check_password():
     st.stop()
 
+# Fuso Horário
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- Funções (Usando make_api_request) ---
+# --- Funções (Agora usando make_api_request) ---
 
 def get_admin_names():
     url = "https://api.intercom.io/admins"
@@ -27,22 +28,20 @@ def fetch_activity_logs(start_ts, end_ts, progress_bar):
     params = { "created_at_after": start_ts, "created_at_before": end_ts }
     logs = []
     
-    # 1. Primeira chamada segura
+    # Chamada segura
     data = make_api_request("GET", url, params=params)
     if not data: return []
     
     logs.extend(data.get('activity_logs', []))
     
-    # 2. Paginação
+    # Paginação segura
     pages = 0
     while data.get('pages', {}).get('next') and pages < 40:
         pages += 1
         progress_bar.progress(pages / 40, text=f"Baixando histórico (Página {pages})...")
         
         url_next = data['pages']['next']
-        # make_api_request já trata o token, então passamos só a URL se ela for completa,
-        # mas a API de log pagination geralmente devolve URL completa.
-        # Nesse caso, passamos params=None pois o cursor já está na URL.
+        # Passamos a URL da próxima página direto
         data = make_api_request("GET", url_next)
         
         if data:
