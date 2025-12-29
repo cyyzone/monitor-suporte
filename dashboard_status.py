@@ -3,9 +3,15 @@ import requests
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta, timezone
+from utils import check_password
 
 # --- Configs da Página ---
 st.set_page_config(page_title="Ponto & Status (Dinâmico)", page_icon="📊", layout="wide")
+
+# 🔒 BLOQUEIO DE SEGURANÇA ------------------------
+if not check_password():
+    st.stop()  # Para a execução do script aqui se não tiver senha
+# -------------------------------------------------
 
 try:
     TOKEN = st.secrets["INTERCOM_TOKEN"]
