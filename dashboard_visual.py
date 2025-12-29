@@ -11,12 +11,10 @@ from utils import check_password, make_api_request
 st.set_page_config(page_title="Monitor Operacional", page_icon="🚀", layout="wide")
 
 # 🔒 BLOQUEIO DE SEGURANÇA
-# Se a senha não for válida, o script para aqui e não mostra nada.
 if not check_password():
     st.stop()
 
 # --- Configuração de Segredos ---
-# Removemos o bloco try/except inseguro. Se não tiver configuração, deve avisar o erro.
 try:
     APP_ID = st.secrets["INTERCOM_APP_ID"]
 except KeyError:
@@ -28,8 +26,9 @@ TEAM_ID = 2975006
 META_AGENTES = 4
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- Funções de Busca (Usando make_api_request) ---
+# --- Funções de Busca (Com Cache) ---
 
+@st.cache_data(ttl=60)
 def get_admin_details():
     """Busca lista de admins para mapear ID -> Nome e Status."""
     url = "https://api.intercom.io/admins"
@@ -44,6 +43,7 @@ def get_admin_details():
             }
     return dados
 
+@st.cache_data(ttl=60)
 def get_team_members(team_id):
     """Busca IDs dos membros do time."""
     url = f"https://api.intercom.io/teams/{team_id}"
@@ -52,6 +52,7 @@ def get_team_members(team_id):
         return data.get('admin_ids', [])
     return []
 
+@st.cache_data(ttl=60)
 def count_conversations(admin_id, state):
     """Conta tickets em um estado específico para um agente."""
     url = "https://api.intercom.io/conversations/search"
@@ -69,6 +70,7 @@ def count_conversations(admin_id, state):
         return data.get('total_count', 0)
     return 0
 
+@st.cache_data(ttl=60)
 def get_team_queue_details(team_id):
     """Retorna lista de tickets na fila (sem agente atribuído)."""
     url = "https://api.intercom.io/conversations/search"
@@ -90,6 +92,7 @@ def get_team_queue_details(team_id):
                 detalhes_fila.append({'id': conv['id']})
     return detalhes_fila
 
+@st.cache_data(ttl=60)
 def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
     """Retorna estatísticas de volume e lista detalhada de tickets."""
     url = "https://api.intercom.io/conversations/search"
@@ -140,6 +143,7 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
                 
     return total_periodo, total_recente, stats_periodo, stats_30min, detalhes_por_agente
 
+@st.cache_data(ttl=60)
 def get_latest_conversations(team_id, ts_inicio, limit=10):
     """Retorna as últimas N conversas para a tabela de log."""
     url = "https://api.intercom.io/conversations/search"
@@ -182,11 +186,14 @@ def atualizar_painel():
         ts_inicio = int(now.replace(hour=0, minute=0, second=0).timestamp())
         texto_volume = "Volume (Dia / 30min)"
     else:
+        # Nota: Como o cache depende dos argumentos, o timestamp mudando a cada segundo
+        # faria o cache ser ignorado no modo "48h". 
+        # Para aproveitar o cache, podemos arredondar para o minuto mais próximo se necessário,
+        # mas mantive a lógica original por enquanto.
         ts_inicio = int((now - timedelta(hours=48)).timestamp())
         texto_volume = "Volume (48h / 30min)"
 
     # --- Coleta de Dados ---
-    # Usamos st.spinner para dar feedback visual durante o carregamento
     with st.spinner("Sincronizando com Intercom..."):
         ids_time = get_team_members(TEAM_ID)
         admins = get_admin_details()
@@ -338,5 +345,4 @@ def atualizar_painel():
         """)
 
 # --- Execução Principal ---
-# Chamada única da função decorada com @st.fragment
 atualizar_painel()
