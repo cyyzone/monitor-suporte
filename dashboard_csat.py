@@ -3,11 +3,16 @@ import requests
 import pandas as pd
 import time
 from datetime import datetime, timezone, timedelta, time as dt_time
+from utils import check_password
 
 # --- Configurações Iniciais ---
 # Aqui eu defino o título da página e o ícone que vai aparecer na aba do navegador.
 st.set_page_config(page_title="Painel de Qualidade (CSAT)", page_icon="⭐", layout="wide")
 
+# 🔒 BLOQUEIO DE SEGURANÇA ------------------------
+if not check_password():
+    st.stop()  # Para a execução do script aqui se não tiver senha
+# -------------------------------------------------
 # Aqui é onde eu tento pegar as senhas de acesso (Token e App ID).
 # Se eu estiver rodando na nuvem (Streamlit Cloud), ele pega dos 'secrets'.
 # Se eu estiver rodando no meu computador (local), ele cai no 'except' e usa o token de teste.
