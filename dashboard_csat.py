@@ -8,10 +8,12 @@ from utils import check_password, make_api_request
 st.set_page_config(page_title="Painel de Qualidade (CSAT)", page_icon="⭐", layout="wide")
 
 # 🔒 BLOQUEIO DE SEGURANÇA
+# Basico de seguranca: sem senha, nao passa daqui.
 if not check_password():
     st.stop()
 
 # 🔑 RECUPERAÇÃO DE SEGREDOS
+# Pego o ID do app nos secrets. Se nao tiver la, aviso e paro tudo.
 try:
     APP_ID = st.secrets["INTERCOM_APP_ID"]
 except KeyError:
@@ -23,14 +25,23 @@ FUSO_BR = timezone(timedelta(hours=-3))
 
 # --- Funções (Usando make_api_request) ---
 
+@st.cache_data(ttl=60, show_spinner=False)
 def get_admin_names():
+    """Busco os nomes dos admins pra nao mostrar so o ID feio na tela."""
     url = "https://api.intercom.io/admins"
     data = make_api_request("GET", url)
     if data:
+        # Faço um dicionario {id: nome} pra facilitar a busca depois
         return {a['id']: a['name'] for a in data.get('admins', [])}
     return {}
 
-def fetch_csat_data(start_ts, end_ts, progress_bar):
+# Cache de 60s e sem spinner pra nao incomodar a UI
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_csat_data(start_ts, end_ts):
+    """
+    Aqui é onde eu baixo as conversas. 
+    Tirei a barra de progresso daqui de dentro pro cache funcionar liso e nao dar erro de hash.
+    """
     url = "https://api.intercom.io/conversations/search"
     payload = {
         "query": {
@@ -46,19 +57,17 @@ def fetch_csat_data(start_ts, end_ts, progress_bar):
     
     conversas = []
     
-    # 1. Primeira chamada segura
+    # 1. Primeira chamada pra ver se tem algo
     data = make_api_request("POST", url, json=payload)
     if not data: return []
     
     total = data.get('total_count', 0)
     conversas.extend(data.get('conversations', []))
     
-    # 2. Paginação segura
+    # 2. Se tiver mais paginas, entro no loop pra baixar o resto
     if total > 0:
         while data.get('pages', {}).get('next'):
-            pct = min(len(conversas) / total, 0.99)
-            progress_bar.progress(pct, text=f"Baixando... ({len(conversas)} de {total})")
-            
+            # Pego o token da proxima pagina
             payload['pagination']['starting_after'] = data['pages']['next']['starting_after']
             data = make_api_request("POST", url, json=payload)
             
@@ -67,10 +76,13 @@ def fetch_csat_data(start_ts, end_ts, progress_bar):
             else: 
                 break
             
-    progress_bar.progress(1.0, text="Pronto!")
     return conversas
 
 def process_stats(conversas, start_ts, end_ts, admins_map):
+    """
+    Essa funcao processa os dados brutos. 
+    Separo o que é positiva, neutra e negativa e monto a lista detalhada.
+    """
     stats = {}
     details_list = []
     time_pos, time_neu, time_neg = 0, 0, 0
@@ -78,6 +90,7 @@ def process_stats(conversas, start_ts, end_ts, admins_map):
     for c in conversas:
         aid = str(c.get('admin_assignee_id'))
         
+        # Se nao tiver admin ou nota, pulo fora
         if not aid or not c.get('conversation_rating'): continue
         
         rating_obj = c['conversation_rating']
@@ -87,13 +100,14 @@ def process_stats(conversas, start_ts, end_ts, admins_map):
         data_nota = rating_obj.get('created_at')
         if not data_nota: continue
         
-        # Filtro de data da NOTA
+        # Garanto que a data da NOTA ta dentro do filtro (as vezes o ticket atualizou depois)
         if not (start_ts <= data_nota <= end_ts): continue
 
         if aid not in stats: stats[aid] = {'pos':0, 'neu':0, 'neg':0, 'total':0}
         stats[aid]['total'] += 1
         
         label_nota = ""
+        # Classifico a nota (Regra: 4 e 5 é bom, 3 é meh, resto é ruim)
         if nota >= 4:
             stats[aid]['pos'] += 1; time_pos += 1; label_nota = "😍 Positiva"
         elif nota == 3:
@@ -106,6 +120,7 @@ def process_stats(conversas, start_ts, end_ts, admins_map):
         comentario = rating_obj.get('remark', '-')
         link_url = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c['id']}"
         
+        # Guardo tudo bonitinho pra tabela
         details_list.append({
             "Data": dt_evento,
             "Agente": nome_agente,
@@ -138,6 +153,7 @@ with st.form("filtro_csat"):
 
 if submit_btn:
     ts_start, ts_end = 0, 0
+    # Ajusto o timestamp pra pegar o dia inteiro (00:00 ate 23:59)
     if isinstance(periodo, tuple):
         d_im = periodo[0]
         d_fm = periodo[1] if len(periodo) > 1 else periodo[0]
@@ -148,16 +164,18 @@ if submit_btn:
         ts_end = int(datetime.combine(periodo, dt_time.max).timestamp())
         
     status_holder = st.empty()
-    progress_bar = st.progress(0, text="Conectando no Intercom...")
     
-    admins = get_admin_names()
-    raw_data = fetch_csat_data(ts_start, ts_end, progress_bar)
+    # Tirei a progress bar visual daqui pq agora o processo é silencioso/cacheado
+    # Se precisar de feedback visual, uso um spinner simples
+    with st.spinner("Buscando avaliações no Intercom..."):
+        admins = get_admin_names()
+        # Chamo a funcao otimizada sem passar a barra de progresso
+        raw_data = fetch_csat_data(ts_start, ts_end)
     
-    time.sleep(0.5)
-    progress_bar.empty()
-    
+    # Processo os dados em memoria (isso é rapido, nao precisa de cache)
     stats_agentes, stats_time, lista_detalhada = process_stats(raw_data, ts_start, ts_end, admins)
     
+    # Salvo no session_state pra nao perder se a tela recarregar
     st.session_state['dados_csat'] = {
         'stats_agentes': stats_agentes,
         'stats_time': stats_time,
@@ -169,9 +187,11 @@ if 'dados_csat' in st.session_state:
     stats_time = dados['stats_time']
     lista_detalhada = dados['lista_detalhada']
     
+    # Calculo das metricas gerais do time
     total_time_csat = stats_time['total']
     csat_real_time = (stats_time['pos'] / total_time_csat * 100) if total_time_csat > 0 else 0
     
+    # CSAT Ajustado ignora as neutras, o pessoal de CS gosta de ver assim
     total_valid_time = stats_time['pos'] + stats_time['neg']
     csat_adjusted_time = (stats_time['pos'] / total_valid_time * 100) if total_valid_time > 0 else 0
 
@@ -189,6 +209,7 @@ if 'dados_csat' in st.session_state:
     if lista_detalhada:
         df_det = pd.DataFrame(lista_detalhada)
         
+        # Agrupo por agente pra fazer aquela tabela resumo bonita
         resumo = df_det.groupby('Agente').agg(
             Total=('Nota', 'count'),
             Positivas=('Nota', lambda x: (x >= 4).sum()),
@@ -196,9 +217,11 @@ if 'dados_csat' in st.session_state:
             Negativas=('Nota', lambda x: (x <= 2).sum())
         ).reset_index()
         
+        # Recalculo o CSAT individual aqui
         resumo['CSAT Ajustado'] = resumo.apply(lambda row: (row['Positivas'] / (row['Positivas'] + row['Negativas']) * 100) if (row['Positivas'] + row['Negativas']) > 0 else 0, axis=1)
         resumo['CSAT Real'] = resumo.apply(lambda row: (row['Positivas'] / row['Total'] * 100) if row['Total'] > 0 else 0, axis=1)
         
+        # Formato pra porcentagem
         resumo['CSAT Ajustado'] = resumo['CSAT Ajustado'].map('{:.1f}%'.format)
         resumo['CSAT Real'] = resumo['CSAT Real'].map('{:.1f}%'.format)
         
