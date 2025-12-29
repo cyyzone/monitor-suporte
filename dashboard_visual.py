@@ -4,9 +4,15 @@ import pandas as pd
 import time
 import re
 from datetime import datetime, timezone, timedelta
+from utils import check_password  
 
 # --- Configs da Página ---
 st.set_page_config(page_title="Monitor Operacional", page_icon="🚀", layout="wide")
+
+# 🔒 BLOQUEIO DE SEGURANÇA ------------------------
+if not check_password():
+    st.stop()  # Para a execução do script aqui se não tiver senha
+# -------------------------------------------------
 
 # Tenta pegar as chaves do arquivo secrets (pra rodar na nuvem)
 # Se não achar (rodando local), usa o que estiver hardcoded no except.
@@ -368,4 +374,5 @@ st.rerun()
 # Loop de refresh: dorme 60s e recarrega a página inteira
 time.sleep(60)
 st.rerun()
+
 
