@@ -83,3 +83,20 @@ def make_api_request(method, url, json=None, params=None, max_retries=3):
             
     st.error("Falha na conexão com a API após várias tentativas.")
     return None
+
+def send_slack_alert(message):
+    """Envia notificação para o Slack se o webhook estiver configurado."""
+    # Tenta pegar o webhook
+    webhook = st.secrets.get("SLACK_WEBHOOK")
+    
+    if not webhook:
+        # Se entrar aqui, é porque a senha não foi lida!
+        print("❌ ERRO: Webhook do Slack não encontrado nos secrets.") 
+        return
+
+    payload = {"text": message}
+    
+    try:
+        requests.post(webhook, json=payload)
+    except Exception as e:
+        print(f"Erro ao enviar alerta Slack: {e}")
