@@ -243,7 +243,7 @@ def atualizar_painel():
         
         # Cálculo do tempo
         tempo_passado = time.time() - st.session_state["ultimo_alerta_ts"]
-        tempo_restante = 1800 - tempo_passado
+        tempo_restante = 600 - tempo_passado
         
         c_debug1, c_debug2 = st.columns(2)
         with c_debug1:
@@ -377,6 +377,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
