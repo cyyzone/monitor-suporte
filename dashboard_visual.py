@@ -234,6 +234,31 @@ def atualizar_painel():
         st.toast("🔔 Alerta enviado para o Slack!", icon="📨")
     # ----------------------------------
 
+    # >>>>> CÓDIGO DE DEBUG INSERIDO AQUI <<<<<
+    st.divider()
+    with st.expander("🛠️ Debug Técnico do Alerta", expanded=True):
+        st.write(f"**Condição Fila:** {len(fila)} > 0? {'SIM' if len(fila)>0 else 'NÃO'}")
+        st.write(f"**Condição Meta:** {online} < {META_AGENTES}? {'SIM' if online < META_AGENTES else 'NÃO'}")
+        st.write(f"**Lista de Alertas Gerada:** {msg_alerta}")
+        
+        # Cálculo do tempo
+        tempo_passado = time.time() - st.session_state["ultimo_alerta_ts"]
+        tempo_restante = 1800 - tempo_passado
+        
+        c_debug1, c_debug2 = st.columns(2)
+        with c_debug1:
+            if tempo_restante > 0:
+                st.warning(f"⏳ **Em Resfriamento:** Faltam {int(tempo_restante/60)}min para permitir novo envio.")
+            else:
+                st.success("✅ **Pronto para envio:** O sistema enviará assim que detectar erro.")
+        
+        with c_debug2:
+            if st.button("🚨 FORÇAR ENVIO AGORA (Resetar Timer)"):
+                st.session_state["ultimo_alerta_ts"] = 0
+                st.rerun()
+    st.divider()
+    # >>>>> FIM DO DEBUG <<<<<
+
     # Cards do Topo
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
