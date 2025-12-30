@@ -4,40 +4,30 @@ import time
 import re
 from datetime import datetime, timezone, timedelta
 
-# Importei do utils pra não ficar bagunçado aqui
-from utils import check_password, make_api_request
+# Importei a nova função send_slack_alert do utils
+from utils import check_password, make_api_request, send_slack_alert 
 
 # --- Configs da Página ---
 st.set_page_config(page_title="Monitor Operacional", page_icon="🚀", layout="wide")
 
-# 🔒 BLOQUEIO DE SEGURANÇA
-# Se a senha tiver errada, nem carrega o resto, para aqui mesmo.
 if not check_password():
     st.stop()
 
-# --- Configuração de Segredos ---
-# Tenta pegar o ID no secrets, as vezes a gente esquece de configurar
 try:
     APP_ID = st.secrets["INTERCOM_APP_ID"]
 except KeyError:
     st.error("❌ Erro Crítico: 'INTERCOM_APP_ID' não encontrado no secrets.toml")
     st.stop()
 
-# Constantes que uso no codigo todo
 TEAM_ID = 2975006
 META_AGENTES = 4
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- Funções de Busca (Silenciosas) ---
-# Aqui ta o segredo da performance. O ttl=60 segura os dados por 1 minuto pra nao estourar a API.
-# O show_spinner=False eu coloquei pra nao ficar piscando "Loading" na tela do usuario toda hora.
-
+# --- Funções de Busca (Mantidas iguais) ---
 @st.cache_data(ttl=60, show_spinner=False)
 def get_admin_details():
-    """Pego a lista de admins pra saber o nome de cada ID e ver se ta Away."""
     url = "https://api.intercom.io/admins"
     data = make_api_request("GET", url)
-    
     dados = {}
     if data:
         for admin in data.get('admins', []):
@@ -49,16 +39,13 @@ def get_admin_details():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_team_members(team_id):
-    """Filtro só quem faz parte do time de suporte mesmo."""
     url = f"https://api.intercom.io/teams/{team_id}"
     data = make_api_request("GET", url)
-    if data:
-        return data.get('admin_ids', [])
+    if data: return data.get('admin_ids', [])
     return []
 
 @st.cache_data(ttl=60, show_spinner=False)
 def count_conversations(admin_id, state):
-    """Funcao pra contar quantos tickets o agente tem aberto ou pausado."""
     url = "https://api.intercom.io/conversations/search"
     payload = {
         "query": {
@@ -70,13 +57,11 @@ def count_conversations(admin_id, state):
         }
     }
     data = make_api_request("POST", url, json=payload)
-    if data:
-        return data.get('total_count', 0)
+    if data: return data.get('total_count', 0)
     return 0
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_team_queue_details(team_id):
-    """Olho a fila pra ver se tem ticket 'sem dono' (admin_assignee_id vazio)."""
     url = "https://api.intercom.io/conversations/search"
     payload = {
         "query": {
@@ -98,9 +83,7 @@ def get_team_queue_details(team_id):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
-    """Essa aqui é a mais pesada. Pega volume total e o que entrou nos ultimos 30min."""
     url = "https://api.intercom.io/conversations/search"
-    # Calculo o tempo de corte pros tickets recentes
     ts_corte_recente = int(time.time()) - (minutos_recente * 60)
 
     payload = {
@@ -126,15 +109,10 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
         conversas = data.get('conversations', [])
         total_periodo = len(conversas)
         for conv in conversas:
-            # Se nao tiver admin, jogo pra conta da FILA
             aid = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
-            
-            # Vou somando um por um
             stats_periodo[aid] = stats_periodo.get(aid, 0) + 1
             
-            # Guardo os detalhes pra mostrar naquele expander depois
-            if aid not in detalhes_por_agente:
-                detalhes_por_agente[aid] = []
+            if aid not in detalhes_por_agente: detalhes_por_agente[aid] = []
             
             detalhes_por_agente[aid].append({
                 'id': conv['id'],
@@ -142,7 +120,6 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
                 'link': f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{conv['id']}"
             })
             
-            # Se for ticket novo (recente), conto pro icone de raio
             if conv['created_at'] > ts_corte_recente:
                 stats_30min[aid] = stats_30min.get(aid, 0) + 1
                 total_recente += 1
@@ -151,7 +128,6 @@ def get_daily_stats(team_id, ts_inicio, minutos_recente=30):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_latest_conversations(team_id, ts_inicio, limit=10):
-    """Pego só as ultimas conversas pra aquela tabelinha do lado direito."""
     url = "https://api.intercom.io/conversations/search"
     payload = {
         "query": {
@@ -165,18 +141,19 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
         "pagination": {"per_page": limit}
     }
     data = make_api_request("POST", url, json=payload)
-    if data:
-        return data.get('conversations', [])
+    if data: return data.get('conversations', [])
     return []
 
-# --- Interface Visual com Auto-Refresh (@st.fragment) ---
+# --- Interface Visual com Auto-Refresh ---
 
-# Usei fragment pra atualizar só essa parte a cada 60s, senao recarrega a pagina toda e fica chato
 @st.fragment(run_every=60)
 def atualizar_painel():
     st.title("🚀 Monitor Operacional (Tempo Real)")
 
-    # Filtro basico de data
+    # ⚡ ALERTA SLACK: Inicializa variavel de controle de tempo na sessão
+    if "ultimo_alerta_ts" not in st.session_state:
+        st.session_state["ultimo_alerta_ts"] = 0
+
     col_filtro, _ = st.columns([1, 3])
     with col_filtro:
         periodo_selecionado = st.radio(
@@ -188,7 +165,6 @@ def atualizar_painel():
     st.markdown("---")
 
     now = datetime.now(FUSO_BR)
-    # Defino o inicio da busca dependendo do filtro
     if "Hoje" in periodo_selecionado:
         ts_inicio = int(now.replace(hour=0, minute=0, second=0).timestamp())
         texto_volume = "Volume (Dia / 30min)"
@@ -196,32 +172,26 @@ def atualizar_painel():
         ts_inicio = int((now - timedelta(hours=48)).timestamp())
         texto_volume = "Volume (48h / 30min)"
 
-    # --- Coleta de Dados (Sem spinner visual) ---
-    # Chamo as funcoes com cache aqui. Como tirei o spinner, roda "invisivel" pro usuario.
+    # Coleta de Dados
     ids_time = get_team_members(TEAM_ID)
     admins = get_admin_details()
     fila = get_team_queue_details(TEAM_ID)
-    
     vol_periodo, vol_rec, stats_periodo, stats_rec, detalhes_agente = get_daily_stats(TEAM_ID, ts_inicio)
-    
     ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
     online = 0
     tabela = []
     
-    # Monto os dados pra tabela principal
     for mid in ids_time:
         sid = str(mid)
         info = admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
         
-        # Logica do status (emoji)
         if not info['is_away']: online += 1
         emoji = "🔴" if info['is_away'] else "🟢"
         
         abertos = count_conversations(mid, 'open')
         pausados = count_conversations(mid, 'snoozed')
         
-        # Alertas Visuais: triangulo se tiver muita coisa e raio se tiver trabalhando muito agora
         alerta = "⚠️" if abertos >= 5 else ""
         raio = "⚡" if stats_rec.get(sid, 0) >= 3 else ""
         
@@ -234,22 +204,43 @@ def atualizar_painel():
             "Pausados": pausados
         })
     
-    # --- ORDENAÇÃO AUTOMÁTICA (O Pulo do Gato) ---
-    # 1. Primeiro arrumo por nome pra desempatar
     tabela = sorted(tabela, key=lambda x: x['Agente'])
-    
-    # 2. Depois jogo os online (verde) pra cima.
-    # Como o codigo do emoji verde é "maior" que o vermelho, o reverse=True faz a magica.
     tabela = sorted(tabela, key=lambda x: x['Status'], reverse=True)
 
-    # --- Cards do Topo ---
+    # --- LÓGICA DE ALERTA DO SLACK ---
+    # Definição das condições criticas
+    msg_alerta = []
+    
+    # 1. Fila com gente esperando
+    if len(fila) > 0:
+        msg_alerta.append(f"🔥 *CRÍTICO:* Existem *{len(fila)} clientes* aguardando na fila!")
+    
+    # 2. Pouca gente online (Meta nao batida)
+    if online < META_AGENTES:
+        msg_alerta.append(f"⚠️ *ATENÇÃO:* Equipe abaixo da meta! Apenas *{online}/{META_AGENTES}* online.")
+
+    # 3. Verifica se pode enviar (Cooldown de 30 minutos = 1800 segundos)
+    agora = time.time()
+    TEMPO_RESFRIAMENTO = 1800 
+
+    if msg_alerta and (agora - st.session_state["ultimo_alerta_ts"] > TEMPO_RESFRIAMENTO):
+        # Monta a mensagem bonita pro Slack
+        texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta) + f"\nLink: https://app.intercom.com/a/inbox/{APP_ID}/inbox"
+        
+        send_slack_alert(texto_final)
+        
+        # Atualiza o relogio
+        st.session_state["ultimo_alerta_ts"] = agora
+        st.toast("🔔 Alerta enviado para o Slack!", icon="📨")
+    # ----------------------------------
+
+    # Cards do Topo
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
     c2.metric(texto_volume, f"{vol_periodo} / {vol_rec}")
     c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
     c4.metric("Atualizado", datetime.now(FUSO_BR).strftime("%H:%M:%S"))
     
-    # Se tiver fila, grita em vermelho
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
         links_md = ""
@@ -264,12 +255,10 @@ def atualizar_painel():
 
     st.markdown("---")
 
-    # --- Layout das Tabelas ---
     c_left, c_right = st.columns([2, 1])
 
     with c_left:
         st.subheader("Performance da Equipe")
-        # Mostro a tabela ja ordenada
         st.dataframe(
             pd.DataFrame(tabela), 
             use_container_width=True, 
@@ -277,16 +266,13 @@ def atualizar_painel():
             column_order=["Status", "Agente", "Abertos", "Volume Período", "Recente (30m)", "Pausados"]
         )
         
-        # Detalhes expansíveis
         st.markdown("---")
         st.subheader("🕵️ Detalhe dos Tickets por Agente")
         
         if len(ids_time) > 0:
             cols = st.columns(3) 
-            # Tive que fazer uma logica aqui pra ordenar os cards igual a tabela (online primeiro)
             ordem_nomes = [t['Agente'] for t in tabela]
             
-            # Reordeno a lista de IDs baseada nos nomes da tabela
             ids_time_ordenados = sorted(ids_time, key=lambda mid: 
                 ordem_nomes.index(admins.get(str(mid), {}).get('name', '')) 
                 if admins.get(str(mid), {}).get('name', '') in ordem_nomes else 999
@@ -311,7 +297,6 @@ def atualizar_painel():
 
     with c_right:
         st.subheader("Últimas Atribuições")
-        # Monto o historico lateral e limpo o HTML do body pra ficar legivel
         hist_dados = []
         for conv in ultimas:
             dt_obj = datetime.fromtimestamp(conv['created_at'], tz=FUSO_BR)
@@ -323,7 +308,6 @@ def atualizar_painel():
                 nome_agente = admins.get(str(adm_id), {}).get('name', 'Desconhecido')
             
             subject = conv.get('source', {}).get('subject', '')
-            # Tenta limpar as tags HTML se o ticket vier sem assunto
             if not subject:
                 body = conv.get('source', {}).get('body', '')
                 clean_body = re.sub(r'<[^>]+>', ' ', body).strip()
@@ -354,7 +338,6 @@ def atualizar_painel():
                 hide_index=True,
                 disabled=True,
                 use_container_width=True,
-                # Key dinamico pra forçar o refresh visual dessa tabela
                 key=f"hist_{int(time.time())}" 
             )
         else:
@@ -368,5 +351,5 @@ def atualizar_painel():
         * ⚡ **Alta Demanda:** Agente recebeu 3+ tickets em 30min.
         """)
 
-# --- Execução Principal ---
 atualizar_painel()
+
