@@ -182,6 +182,10 @@ def atualizar_painel():
     online = 0
     tabela = []
     
+    # [NOVO] Listas para guardar quem está no limite
+    lista_sobrecarga = []
+    lista_alta_demanda = []
+    
     for mid in ids_time:
         sid = str(mid)
         info = admins.get(sid, {'name': f'ID {sid}', 'is_away': True})
@@ -191,16 +195,25 @@ def atualizar_painel():
         
         abertos = count_conversations(mid, 'open')
         pausados = count_conversations(mid, 'snoozed')
+        volume_recente = stats_rec.get(sid, 0)
         
+        # Lógica Visual
         alerta = "⚠️" if abertos >= 5 else ""
-        raio = "⚡" if stats_rec.get(sid, 0) >= 3 else ""
+        raio = "⚡" if volume_recente >= 3 else ""
+        
+        # [NOVO] Lógica de Captura para Alerta
+        if abertos >= 5:
+            lista_sobrecarga.append(f"{info['name']} ({abertos})")
+            
+        if volume_recente >= 3:
+            lista_alta_demanda.append(f"{info['name']} ({volume_recente})")
         
         tabela.append({
             "Status": emoji,
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta}",
             "Volume Período": stats_periodo.get(sid, 0),
-            "Recente (30m)": f"{stats_rec.get(sid, 0)} {raio}",
+            "Recente (30m)": f"{volume_recente} {raio}",
             "Pausados": pausados
         })
     
@@ -219,13 +232,23 @@ def atualizar_painel():
     if online < META_AGENTES:
         msg_alerta.append(f"⚠️ *ATENÇÃO:* Equipe abaixo da meta! Apenas *{online}/{META_AGENTES}* online.")
 
-    # 3. Verifica se pode enviar (Cooldown de 30 minutos = 1800 segundos)
+    # [NOVO] 3. Sobrecarga Individual
+    if lista_sobrecarga:
+        nomes = ", ".join(lista_sobrecarga)
+        msg_alerta.append(f"⚠️ *SOBRECARGA:* Agentes com 5+ tickets: {nomes}")
+
+    # [NOVO] 4. Alta Demanda Recente
+    if lista_alta_demanda:
+        nomes = ", ".join(lista_alta_demanda)
+        msg_alerta.append(f"⚡ *ALTA DEMANDA:* Agentes a todo vapor (3+ em 30m): {nomes}")
+
+    # 3. Verifica se pode enviar (Cooldown de 10 minutos = 600 segundos)
     agora = time.time()
     TEMPO_RESFRIAMENTO = 600 
 
     if msg_alerta and (agora - st.session_state["ultimo_alerta_ts"] > TEMPO_RESFRIAMENTO):
         # Monta a mensagem bonita pro Slack
-        texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta) + f"\nLink: https://dashboardvisualpy.streamlit.app/"
+        texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta) + f"\nLink: https://dashboardvisualpy.streamlit.app"
         
         send_slack_alert(texto_final)
         
@@ -233,31 +256,6 @@ def atualizar_painel():
         st.session_state["ultimo_alerta_ts"] = agora
         st.toast("🔔 Alerta enviado para o Slack!", icon="📨")
     # ----------------------------------
-
-    # >>>>> CÓDIGO DE DEBUG INSERIDO AQUI <<<<<
-    st.divider()
-    with st.expander("🛠️ Debug Técnico do Alerta", expanded=True):
-        st.write(f"**Condição Fila:** {len(fila)} > 0? {'SIM' if len(fila)>0 else 'NÃO'}")
-        st.write(f"**Condição Meta:** {online} < {META_AGENTES}? {'SIM' if online < META_AGENTES else 'NÃO'}")
-        st.write(f"**Lista de Alertas Gerada:** {msg_alerta}")
-        
-        # Cálculo do tempo
-        tempo_passado = time.time() - st.session_state["ultimo_alerta_ts"]
-        tempo_restante = 600 - tempo_passado
-        
-        c_debug1, c_debug2 = st.columns(2)
-        with c_debug1:
-            if tempo_restante > 0:
-                st.warning(f"⏳ **Em Resfriamento:** Faltam {int(tempo_restante/60)}min para permitir novo envio.")
-            else:
-                st.success("✅ **Pronto para envio:** O sistema enviará assim que detectar erro.")
-        
-        with c_debug2:
-            if st.button("🚨 FORÇAR ENVIO AGORA (Resetar Timer)"):
-                st.session_state["ultimo_alerta_ts"] = 0
-                st.rerun()
-    st.divider()
-    # >>>>> FIM DO DEBUG <<<<<
 
     # Cards do Topo
     c1, c2, c3, c4 = st.columns(4)
@@ -377,6 +375,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
