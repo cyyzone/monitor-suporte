@@ -225,7 +225,7 @@ def atualizar_painel():
 
     if msg_alerta and (agora - st.session_state["ultimo_alerta_ts"] > TEMPO_RESFRIAMENTO):
         # Monta a mensagem bonita pro Slack
-        texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta) + f"\nLink: https://app.intercom.com/a/inbox/{APP_ID}/inbox"
+        texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta) + f"\nLink: https://dashboardvisualpy.streamlit.app/"
         
         send_slack_alert(texto_final)
         
@@ -377,5 +377,6 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
