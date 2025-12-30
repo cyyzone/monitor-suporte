@@ -221,7 +221,7 @@ def atualizar_painel():
 
     # 3. Verifica se pode enviar (Cooldown de 30 minutos = 1800 segundos)
     agora = time.time()
-    TEMPO_RESFRIAMENTO = 1800 
+    TEMPO_RESFRIAMENTO = 600 
 
     if msg_alerta and (agora - st.session_state["ultimo_alerta_ts"] > TEMPO_RESFRIAMENTO):
         # Monta a mensagem bonita pro Slack
@@ -377,4 +377,5 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
