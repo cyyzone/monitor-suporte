@@ -20,7 +20,7 @@ except KeyError:
     st.error("❌ Erro: Configure 'INTERCOM_APP_ID' no arquivo .streamlit/secrets.toml")
     st.stop()
 
-TEAM_ID = 2975006
+TEAM_IDS = [2975006, 1972225]
 FUSO_BR = timezone(timedelta(hours=-3))
 
 # --- Funções (Usando make_api_request) ---
@@ -49,7 +49,7 @@ def fetch_csat_data(start_ts, end_ts):
             "value": [
                 {"field": "updated_at", "operator": ">", "value": start_ts},
                 {"field": "updated_at", "operator": "<", "value": end_ts},
-                {"field": "team_assignee_id", "operator": "=", "value": TEAM_ID}
+                {"field": "team_assignee_id", "operator": "IN", "value": TEAM_IDS}
             ]
         },
         "pagination": {"per_page": 150}
