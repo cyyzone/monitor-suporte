@@ -3,6 +3,8 @@ import pandas as pd # Biblioteca poderosa para manipulação de dados em tabelas
 import time # Para lidar com tempos e pausas.
 import re # O "faxineiro" (Regex). Ele limpa textos sujos cheios de códigos estranhos.
 from datetime import datetime, timezone, timedelta # A nossa "agenda" pra lidar com datas e fusos.
+import os # Para verificar se o arquivo existe
+import json # Para salvar o horário bonitinho
 
 # Em vez de copiar e colar código, eu puxo as funções prontas do arquivo 'utils.py'.
 # É como ter um assistente pessoal que já sabe checar senha e fazer API requests.
@@ -245,19 +247,43 @@ def atualizar_painel(): # Função principal que atualiza o painel.
         nomes = ", ".join(lista_alta_demanda)
         msg_alerta.append(f"⚡ *ALTA DEMANDA:* Agentes a todo vapor (3+ em 30m): {nomes}")
 
-    # 3. Verifica se pode enviar (Cooldown de 10 minutos = 600 segundos)
+    # --- O FOFOQUEIRO INTELIGENTE (Slack Alert com Arquivo) ---
+    # Defino quem é o nosso "Mural de Avisos".
+    ARQUIVO_CONTROLE = "ultimo_alerta.json" 
+    TEMPO_RESFRIAMENTO = 600 # 10 minutos de paz.
     agora = time.time()
-    TEMPO_RESFRIAMENTO = 600 # 10 minutos em segundos
-    # Se tem mensagem E já passou 10 minutos desde o último envio...
-    if msg_alerta and (agora - st.session_state["ultimo_alerta_ts"] > TEMPO_RESFRIAMENTO):
-        # Monta a mensagem bonita pro Slack
+    
+    # 1. TENTO LER O MURAL (Se ele existir)
+    ultimo_envio_geral = 0
+    if os.path.exists(ARQUIVO_CONTROLE):
+        try:
+            with open(ARQUIVO_CONTROLE, "r") as f:
+                # O json.load traduz o texto do arquivo pra um dicionário Python.
+                dados = json.load(f)
+                ultimo_envio_geral = dados.get("timestamp", 0)
+        except:
+            # Se o arquivo estiver corrompido ou travado, eu ignoro e sigo a vida.
+            pass 
+
+    # 2. A HORA DA VERDADE
+    # Tem mensagem? E (Agora - Última vez que alguém gritou) > 10 min?
+    if msg_alerta and (agora - ultimo_envio_geral > TEMPO_RESFRIAMENTO):
+        
         texto_final = "*🚨 Alerta Monitor Suporte*\n" + "\n".join(msg_alerta)
         
-        send_slack_alert(texto_final) # Manda pro Slack!
+        # Mando o motoboy entregar!
+        send_slack_alert(texto_final)
         
-        # Atualiza o relogio
-        st.session_state["ultimo_alerta_ts"] = agora  # Atualizo o relógio.
-        st.toast("🔔 Alerta enviado para o Slack!", icon="📨") # Aviso na tela.
+        # 3. ATUALIZO O MURAL
+        # Escrevo no arquivo: "Gente, acabei de mandar alerta às 14:00!"
+        # Assim, se outra pessoa estiver com o painel aberto, ela vai ler isso e não vai mandar de novo.
+        try:
+            with open(ARQUIVO_CONTROLE, "w") as f:
+                json.dump({"timestamp": agora}, f)
+        except Exception as e:
+            print(f"Erro ao salvar arquivo de controle: {e}")
+            
+        st.toast("🔔 Alerta enviado para o Slack!", icon="📨")
     # ----------------------------------
 
     # --- VISUALIZAÇÃO (O que aparece na tela) ---
