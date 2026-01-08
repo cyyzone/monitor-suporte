@@ -39,7 +39,7 @@ def get_admin_names():
 
 # Cache de 60s e sem spinner pra nao incomodar a UI
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch_csat_data(start_ts, end_ts):
+def fetch_csat_data(start_ts, end_ts, team_ids):
     """
     Aqui é onde eu baixo as conversas. 
     Recebo a data de início e fim (em números/timestamp) e retorno a lista de conversas.
@@ -55,7 +55,7 @@ def fetch_csat_data(start_ts, end_ts):
             "value": [
                 {"field": "updated_at", "operator": ">", "value": start_ts},
                 {"field": "updated_at", "operator": "<", "value": end_ts},
-                {"field": "team_assignee_id", "operator": "=", "value": TEAM_ID}
+                {"field": "team_assignee_id", "operator": "=", "value": TEAM_IDS}
             ]
         },
         "pagination": {"per_page": 150} # Peço pacotes grandes de 150 conversas.
@@ -177,15 +177,15 @@ if submit_btn:
         ts_start = int(datetime.combine(periodo, dt_time.min).timestamp()) # Início do dia
         ts_end = int(datetime.combine(periodo, dt_time.max).timestamp()) # Fim do dia
         
-    status_holder = st.empty() # Placeholder pra status/progresso
-    
-   # Mostro um spinner rodando enquanto busco.
     with st.spinner("Buscando avaliações no Intercom..."):
         admins = get_admin_names()
-        # Chamo a funcao otimizada sem passar a barra de progresso
-        raw_data = fetch_csat_data(ts_start, ts_end) # Baixo os dados brutos.
+        
+        raw_data = []
+        for t_id in TEAM_IDS:
+            dados_time = fetch_csat_data(ts_start, ts_end, t_id)
+            raw_data.extend(dados_time) # Junta tudo na mesma lista
     
-    # Processo os dados em memoria (isso é rapido, nao precisa de cache)
+    # Processo os dados em memoria
     stats_agentes, stats_time, lista_detalhada = process_stats(raw_data, ts_start, ts_end, admins)
     
     #SALVO NA MEMÓRIA (Session State)
