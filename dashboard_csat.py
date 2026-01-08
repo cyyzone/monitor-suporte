@@ -55,7 +55,7 @@ def fetch_csat_data(start_ts, end_ts, team_id):
             "value": [
                 {"field": "updated_at", "operator": ">", "value": start_ts},
                 {"field": "updated_at", "operator": "<", "value": end_ts},
-                {"field": "team_assignee_id", "operator": "=", "value": TEAM_ID}
+                {"field": "team_assignee_id", "operator": "=", "value": team_id}
             ]
         },
         "pagination": {"per_page": 150} # Peço pacotes grandes de 150 conversas.
