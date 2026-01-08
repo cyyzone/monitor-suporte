@@ -20,7 +20,7 @@ except KeyError:
     st.error("❌ Erro: Configure 'INTERCOM_APP_ID' no arquivo .streamlit/secrets.toml")
     st.stop()
 
-TEAM_IDS = [2975006, 1972225]  # IDs dos times que quero monitorar
+TEAM_IDS = [2975006, 1972225, 9156876]  # IDs dos times que quero monitorar
 FUSO_BR = timezone(timedelta(hours=-3)) # Fuso horario de Brasilia
 
 # As Operárias (Funções de Busca)
