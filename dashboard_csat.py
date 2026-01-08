@@ -39,7 +39,7 @@ def get_admin_names():
 
 # Cache de 60s e sem spinner pra nao incomodar a UI
 @st.cache_data(ttl=60, show_spinner=False)
-def fetch_csat_data(start_ts, end_ts, team_ids):
+def fetch_csat_data(start_ts, end_ts, team_id):
     """
     Aqui é onde eu baixo as conversas. 
     Recebo a data de início e fim (em números/timestamp) e retorno a lista de conversas.
@@ -55,7 +55,7 @@ def fetch_csat_data(start_ts, end_ts, team_ids):
             "value": [
                 {"field": "updated_at", "operator": ">", "value": start_ts},
                 {"field": "updated_at", "operator": "<", "value": end_ts},
-                {"field": "team_assignee_id", "operator": "=", "value": TEAM_IDS}
+                {"field": "team_assignee_id", "operator": "=", "value": TEAM_ID}
             ]
         },
         "pagination": {"per_page": 150} # Peço pacotes grandes de 150 conversas.
