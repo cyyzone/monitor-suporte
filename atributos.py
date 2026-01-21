@@ -387,7 +387,7 @@ if 'df_final' in st.session_state:
     kpi4.metric(
         "Tempo Médio", 
         tempo_str, 
-        delta=delta_tempo_seg,
+        delta=delta_exibicao, # <--- CORREÇÃO (Variável de texto formatado)
         delta_color="inverse",
         help=help_text
     )
