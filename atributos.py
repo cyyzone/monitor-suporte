@@ -26,7 +26,6 @@ WORKSPACE_ID = "xwvpdtlu"
 try:
     INTERCOM_ACCESS_TOKEN = st.secrets["INTERCOM_TOKEN"]
 except:
-    # MANTIDO: Chave fixa para o token não sumir
     INTERCOM_ACCESS_TOKEN = st.sidebar.text_input(
         "Intercom Token", 
         type="password", 
@@ -215,14 +214,10 @@ if 'df_final' in st.session_state:
     # --- SELEÇÃO DE COLUNAS ---
     todas_colunas = list(df.columns)
     
-    # Define o nome exato da nova coluna
     COL_EXPANSAO = "Expansão (Passagem de bastão para CSM)"
-    
-    # Adicionei o nome exato na sugestão
     sugestao = ["Tipo de Atendimento", COL_EXPANSAO, "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
-    # NOVO: key para o multiselect
     cols_usuario = st.multiselect(
         "Selecione os atributos para análise:",
         options=[c for c in todas_colunas if c not in ["ID", "timestamp_real", "Data", "Data_Dia", "Link", "Qtd. Atributos", "Atendente"]],
@@ -318,7 +313,6 @@ if 'df_final' in st.session_state:
         
         opcoes_cruzamento = ["Status do atendimento"] + [c for c in cols_usuario if c != "Status do atendimento"]
         
-        # NOVO: key
         cruzamento_agente = st.selectbox("Cruzar Atendente com:", opcoes_cruzamento, key="sel_cruzamento_agente")
         
         if cruzamento_agente in df.columns:
@@ -389,7 +383,6 @@ if 'df_final' in st.session_state:
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
-            # NOVO: keys para os checkboxes
             ocultar_vazios = f1.checkbox("Ocultar vazios", value=True, key="chk_ocultar_vazios")
             ver_complexas = f2.checkbox("🔥 Apenas complexas (2+ atributos)", key="chk_ver_complexas")
         with c2:
@@ -410,13 +403,11 @@ if 'df_final' in st.session_state:
             idx_tipo = 0
             if "Tipo de Atendimento" in cols_usuario:
                 idx_tipo = cols_usuario.index("Tipo de Atendimento") + 1
-            # NOVO: key
             coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=idx_tipo, key="filtro_coluna_1")
         
         with col_v1:
             if coluna_1 != "(Todos)":
-                opcoes_1 = df_view[coluna_1].dropna().unique()
-                # NOVO: key
+                opcoes_1 = sorted(df_view[coluna_1].dropna().unique().tolist())
                 valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1, key="filtro_valores_1")
                 if valores_1:
                     df_view = df_view[df_view[coluna_1].isin(valores_1)]
@@ -431,14 +422,17 @@ if 'df_final' in st.session_state:
                 idx_motivo = 0
                 if "Motivo de Contato" in cols_restantes:
                     idx_motivo = cols_restantes.index("Motivo de Contato") + 1
-                # NOVO: key
                 coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=idx_motivo, key="filtro_coluna_2")
 
             with col_v2:
                 if coluna_2 != "(Nenhum)":
-                    opcoes_2 = df_view[coluna_2].dropna().unique()
-                    # NOVO: key
-                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key="filtro_valores_2")
+                    opcoes_2 = sorted(df_view[coluna_2].dropna().unique().tolist())
+                    
+                    # --- AQUI ESTÁ A CORREÇÃO DA CHAVE DINÂMICA ---
+                    # A chave agora muda se a coluna mudar. Isso evita conflitos.
+                    key_dinamica = f"filtro_valores_v2_{coluna_2}"
+                    
+                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=key_dinamica)
                     if valores_2:
                         df_view = df_view[df_view[coluna_2].isin(valores_2)]
 
