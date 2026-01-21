@@ -319,11 +319,13 @@ if 'df_final' in st.session_state:
     else:
         df["Qtd. Atributos"] = 0
 
-    # --- RESUMO EXECUTIVO COM DELTA ---
+    # --- RESUMO EXECUTIVO COM DELTA (5 COLUNAS) ---
     st.markdown("### 📌 Resumo do Período")
     
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    # AGORA COM 5 COLUNAS PARA CABER O MOTIVO
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
+    # 1. KPIs de Volume
     total_conv = len(df)
     preenchidos = df["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df.columns else 0
     
@@ -333,6 +335,7 @@ if 'df_final' in st.session_state:
     delta_total = total_conv - total_conv_prev
     delta_preenchidos = preenchidos - preenchidos_prev
     
+    # 2. KPI de Resolvidos
     resolvidos = 0
     resolvidos_prev = 0
     if "Status do atendimento" in df.columns:
@@ -342,37 +345,52 @@ if 'df_final' in st.session_state:
     
     delta_resolvidos = resolvidos - resolvidos_prev
     
-    # KPI 4: Tempo Médio de Resolução (FORMATO TEXTO + DELTA LEGÍVEL)
+    # 3. KPI de Tempo (Média)
     col_tempo_seg = "Tempo Resolução (seg)"
-    
     tempo_medio_seg = df[col_tempo_seg].mean() if col_tempo_seg in df.columns else 0
     tempo_medio_prev_seg = df_prev[col_tempo_seg].mean() if not df_prev.empty and col_tempo_seg in df_prev.columns else 0
     
     delta_tempo_seg = tempo_medio_seg - tempo_medio_prev_seg
     
-    # Formata o valor principal
     tempo_str = format_sla_string(tempo_medio_seg)
-    
-    # Formata o Delta (diferença) para ficar legível (ex: 2h 30m)
     delta_str_human = format_sla_string(abs(delta_tempo_seg))
     
-    # Monta a string final do Delta com sinal (+ ou -)
     if delta_tempo_seg > 0: 
-        delta_label = f"{delta_str_human} (piorou)" # Se aumentou o tempo
-        cor_delta = "inverse" # Vermelho
+        help_text = f"Piorou: +{delta_str_human}"
     elif delta_tempo_seg < 0: 
-        delta_label = f"-{delta_str_human} (melhorou)" # Se diminuiu o tempo (sinal negativo explícito)
-        cor_delta = "inverse" # Verde (devido ao inverse e valor negativo lógico)
+        help_text = f"Melhorou: -{delta_str_human}"
     else: 
-        delta_label = "0s"
-        cor_delta = "off"
+        help_text = "Sem alteração"
 
+    # 4. KPI Novo: Principal Motivo
+    top_motivo_txt = "N/A"
+    qtd_top = 0
+    if "Motivo de Contato" in df.columns:
+        counts = df["Motivo de Contato"].value_counts()
+        if not counts.empty:
+            full_name = counts.index[0]
+            qtd_top = counts.values[0]
+            # Pega só o texto depois do último ">" para não ficar gigante
+            top_motivo_txt = str(full_name).split(">")[-1].strip()
+
+    # --- EXIBIÇÃO ---
+    kpi1.metric("Total Conversas", total_conv, delta=delta_total)
+    kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
+    kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
+    
     kpi4.metric(
-        "Tempo Médio Resolução", 
+        "Tempo Médio", 
         tempo_str, 
-        delta=delta_tempo_seg, # Passamos o número para o Streamlit definir a cor (Verde/Vermelho)
-        delta_color="inverse", # Inverse garante que negativo (menos tempo) seja Verde
-        help=f"Variação de {delta_label} em relação ao período anterior"
+        delta=delta_tempo_seg,
+        delta_color="inverse",
+        help=help_text
+    )
+    
+    kpi5.metric(
+        "Principal Motivo",
+        top_motivo_txt,
+        f"{qtd_top} casos",
+        delta_color="off" # Cinza, pois não é exatamente uma variação boa/ruim
     )
 
     st.divider()
@@ -466,7 +484,7 @@ if 'df_final' in st.session_state:
                 k1.metric("Média Geral CSAT", f"{df_csat['CSAT Nota'].mean():.2f}/5.0")
                 k2.metric("Total de Avaliações", len(df_csat))
                 
-                # --- GRÁFICO 1: MÉDIA ---
+                # GRÁFICO 1: MÉDIA
                 if "Motivo de Contato" in df.columns:
                     csat_por_motivo = df_csat.groupby("Motivo de Contato")["CSAT Nota"].mean().reset_index().sort_values("CSAT Nota")
                     fig_csat_avg = px.bar(csat_por_motivo, x="CSAT Nota", y="Motivo de Contato", orientation='h', text_auto='.2f', color="CSAT Nota", color_continuous_scale="RdYlGn", range_color=[1, 5])
@@ -475,17 +493,21 @@ if 'df_final' in st.session_state:
                     
                     st.divider()
                     
-                    # --- GRÁFICO 2 (RESTAURADO): VOLUME DE AVALIAÇÕES ---
+                    # GRÁFICO 2: VOLUME (RESTAURADO)
                     st.subheader("Volume de Avaliações por Nota e Motivo")
-                    
                     df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
                     
-                    fig_csat_vol = px.histogram(
-                        df_csat, 
+                    csat_grouped = df_csat.groupby(["Motivo de Contato", "Nota Label"]).size().reset_index(name='Qtd')
+                    csat_grouped['Total_Motivo'] = csat_grouped.groupby("Motivo de Contato")['Qtd'].transform('sum')
+                    csat_grouped['Label_Pct'] = csat_grouped.apply(lambda x: f"{x['Qtd']} ({(x['Qtd']/x['Total_Motivo']*100):.0f}%)", axis=1)
+
+                    fig_csat_vol = px.bar(
+                        csat_grouped, 
+                        x="Qtd", 
                         y="Motivo de Contato", 
                         color="Nota Label", 
-                        barmode="stack",
-                        text_auto=True,
+                        text="Label_Pct",
+                        orientation='h',
                         category_orders={"Nota Label": ["1", "2", "3", "4", "5"]},
                         color_discrete_map={"1": "#FF4B4B", "2": "#FF8C00", "3": "#FFD700", "4": "#9ACD32", "5": "#008000"}
                     )
