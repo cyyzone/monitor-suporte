@@ -261,18 +261,31 @@ if 'df_final' in st.session_state:
         c1, c2 = st.columns([2, 1])
         with c1:
             if cols_usuario:
-                graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_pie")
-                df_pie = df[df[graf_sel].notna()]
-                fig_pie = px.pie(df_pie, names=graf_sel, hole=0.4, title=f"Distribuição: {graf_sel}")
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                fig_pie.update_layout(showlegend=False)
-                st.plotly_chart(fig_pie, use_container_width=True)
+                graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_bar")
+                
+                # 1. Prepara os dados (Conta quantos tem de cada tipo)
+                df_clean = df[df[graf_sel].notna()]
+                contagem = df_clean[graf_sel].value_counts().reset_index()
+                contagem.columns = ["Opção", "Quantidade"]
+                
+                # 2. Cria o gráfico de Barras
+                fig_bar = px.bar(
+                    contagem, 
+                    x="Opção", 
+                    y="Quantidade", 
+                    text_auto=True, # Mostra o número em cima da barra
+                    title=f"Distribuição: {graf_sel}"
+                )
+                
+                # Ordena as barras da maior para a menor
+                fig_bar.update_layout(xaxis={'categoryorder':'total descending'})
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.warning("Selecione atributos no topo.")
         with c2:
              if cols_usuario:
                  st.write("**Ranking Completo:**")
-                 # AQUI: Removi o .head(10) para mostrar tudo
                  st.dataframe(df[graf_sel].value_counts(), use_container_width=True)
 
     with tab_equipe:
