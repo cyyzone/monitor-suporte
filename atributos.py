@@ -172,7 +172,7 @@ def gerar_excel_multias(df, colunas_selecionadas):
 
 # --- INTERFACE ---
 
-st.title(f"📊 Relatório de Atributos ({WORKSPACE_ID})")
+st.title(f"📊 Relatório de Atributos")
 
 with st.sidebar:
     st.header("Filtros")
