@@ -322,7 +322,6 @@ if 'df_final' in st.session_state:
     # --- RESUMO EXECUTIVO COM DELTA (5 COLUNAS) ---
     st.markdown("### 📌 Resumo do Período")
     
-    # AGORA COM 5 COLUNAS PARA CABER O MOTIVO
     kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
     
     # 1. KPIs de Volume
@@ -353,22 +352,55 @@ if 'df_final' in st.session_state:
     delta_tempo_seg = tempo_medio_seg - tempo_medio_prev_seg
     
     tempo_str = format_sla_string(tempo_medio_seg)
+    tempo_prev_str = format_sla_string(tempo_medio_prev_seg)
     delta_str_human = format_sla_string(abs(delta_tempo_seg))
     
-    # --- CORREÇÃO AQUI ---
-    # Criamos uma string formatada para o delta, em vez de passar o número float bruto
+    # Formatação visual do Delta de Tempo
     delta_exibicao = None
     if delta_tempo_seg > 0: 
-        help_text = f"Piorou: Aumentou em {delta_str_human}"
-        delta_exibicao = f"{delta_str_human}" # Positivo = Vermelho (devido ao inverse)
+        delta_exibicao = f"{delta_str_human}" # Piorou (Aumentou)
     elif delta_tempo_seg < 0: 
-        help_text = f"Melhorou: Diminuiu em {delta_str_human}"
-        delta_exibicao = f"-{delta_str_human}" # Negativo = Verde (devido ao inverse)
+        delta_exibicao = f"-{delta_str_human}" # Melhorou (Diminuiu)
     else: 
-        help_text = "Sem alteração"
         delta_exibicao = "0s"
 
-    # 4. KPI Novo: Principal Motivo
+    # --- EXIBIÇÃO COM TOOLTIPS EXPLICATIVOS ---
+    
+    # KPI 1: Total
+    kpi1.metric(
+        "Total Conversas", 
+        total_conv, 
+        delta=delta_total,
+        delta_color="inverse", # Menos chamados = Verde
+        help=f"Período Anterior: {total_conv_prev} | Atual: {total_conv}"
+    )
+    
+    # KPI 2: Classificados
+    kpi2.metric(
+        "Classificados", 
+        f"{preenchidos}", 
+        delta=delta_preenchidos,
+        help=f"Período Anterior: {preenchidos_prev} | Atual: {preenchidos}"
+    )
+    
+    # KPI 3: Resolvidos
+    kpi3.metric(
+        "Resolvidos", 
+        resolvidos, 
+        delta=delta_resolvidos,
+        help=f"Período Anterior: {resolvidos_prev} | Atual: {resolvidos}"
+    )
+    
+    # KPI 4: Tempo Médio
+    kpi4.metric(
+        "Tempo Médio", 
+        tempo_str, 
+        delta=delta_exibicao, 
+        delta_color="inverse", # Menos tempo = Verde
+        help=f"Anterior: {tempo_prev_str} ➡ Atual: {tempo_str}"
+    )
+    
+    # KPI 5: Motivo Principal
     top_motivo_txt = "N/A"
     qtd_top = 0
     if "Motivo de Contato" in df.columns:
@@ -376,44 +408,8 @@ if 'df_final' in st.session_state:
         if not counts.empty:
             full_name = counts.index[0]
             qtd_top = counts.values[0]
-            # Pega só o texto depois do último ">" para não ficar gigante
             top_motivo_txt = str(full_name).split(">")[-1].strip()
-
-    # --- EXIBIÇÃO ---
-    
-    # KPI 1: Total de Conversas (INVERSO: Menos é Melhor)
-    kpi1.metric(
-        "Total Conversas", 
-        total_conv, 
-        delta=delta_total,
-        delta_color="inverse", # Se subir fica Vermelho, se cair fica Verde
-        help="Volume de chamados. Queda é considerada positiva (menos problemas)."
-    )
-    
-    # KPI 2: Classificados (NORMAL: Mais é melhor, pois indica organização)
-    kpi2.metric(
-        "Classificados", 
-        f"{preenchidos}", 
-        delta=delta_preenchidos
-    )
-    
-    # KPI 3: Resolvidos (NORMAL: Mais é melhor, indica produtividade)
-    kpi3.metric(
-        "Resolvidos", 
-        resolvidos, 
-        delta=delta_resolvidos
-    )
-    
-    # KPI 4: Tempo Médio (INVERSO: Menos tempo é melhor)
-    kpi4.metric(
-        "Tempo Médio", 
-        tempo_str, 
-        delta=delta_exibicao, 
-        delta_color="inverse",
-        help=help_text
-    )
-    
-    # KPI 5: Motivo Principal (Neutro)
+            
     kpi5.metric(
         "Principal Motivo",
         top_motivo_txt,
