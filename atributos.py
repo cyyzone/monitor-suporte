@@ -310,15 +310,17 @@ if 'df_final' in st.session_state:
             fig_cross2.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross2, use_container_width=True)
 
-    with tab_motivos:
+with tab_motivos:
         st.markdown("### 🔗 Análise Unificada de Motivos")
         col_m1 = "Motivo de Contato"
         col_m2 = "Motivo 2 (Se houver)"
+        
         if col_m1 in df.columns and col_m2 in df.columns:
-            # 1. RANKING GLOBAL
+            # 1. RANKING GLOBAL (Mantém apenas isso)
             lista_geral = pd.concat([df[col_m1], df[col_m2]])
             ranking_global = lista_geral.value_counts().reset_index()
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
+            
             c_rank1, c_rank2 = st.columns([2, 1])
             with c_rank1:
                 fig_global = px.bar(ranking_global.head(15), x="Incidência Total", y="Motivo Unificado", 
@@ -327,19 +329,10 @@ if 'df_final' in st.session_state:
                 st.plotly_chart(fig_global, use_container_width=True)
             with c_rank2:
                 st.dataframe(ranking_global, use_container_width=True, hide_index=True)
-            st.divider()
-            # 2. MATRIZ
-            st.subheader("🧲 Matriz de Combinação")
-            df_duplo = df.dropna(subset=[col_m1, col_m2])
-            if not df_duplo.empty:
-                fig_heat = px.density_heatmap(df_duplo, x=col_m2, y=col_m1, title="Mapa de Calor", color_continuous_scale="Blues")
-                st.plotly_chart(fig_heat, use_container_width=True)
-            else:
-                st.warning("Nenhuma conversa com Motivo 1 e Motivo 2 preenchidos simultaneamente encontrada.")
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
-    with tab_tabela:
+with tab_tabela:
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
@@ -350,17 +343,20 @@ if 'df_final' in st.session_state:
             st.download_button("📥 Baixar Excel", data=excel_data, file_name="relatorio_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
         df_view = df.copy()
+        
+        # Filtros
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
-        cols_display = ["Data", "Atendente", "Link", "Qtd. Atributos"] + cols_usuario
+        # REMOVIDO: "Qtd. Atributos" da lista abaixo
+        cols_display = ["Data", "Atendente", "Link"] + cols_usuario
         cols_display = [c for c in cols_display if c in df_view.columns]
 
         st.dataframe(
             df_view[cols_display], 
             use_container_width=True,
             column_config={
-                "Link": st.column_config.LinkColumn("Link", display_text="Abrir"),
-                "Qtd. Atributos": st.column_config.ProgressColumn("Info", format="%d", min_value=0, max_value=len(cols_usuario))
+                "Link": st.column_config.LinkColumn("Link", display_text="Abrir")
+                # REMOVIDO: A configuração do ProgressColumn ("Info")
             }
         )
