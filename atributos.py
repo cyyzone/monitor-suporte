@@ -341,12 +341,25 @@ if 'df_final' in st.session_state:
                 # Para garantir que o gráfico mostre notas inteiras como categoria e não número contínuo
                 df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
                 
-                fig_csat_vol = px.histogram(
-                    df_csat, 
+                # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
+                st.subheader("Volume de Avaliações por Nota e Motivo")
+                
+                df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
+                
+                # --- CÁLCULO DE PORCENTAGEM PARA O CSAT ---
+                csat_grouped = df_csat.groupby(["Motivo de Contato", "Nota Label"]).size().reset_index(name='Qtd')
+                csat_grouped['Total_Motivo'] = csat_grouped.groupby("Motivo de Contato")['Qtd'].transform('sum')
+                csat_grouped['Label_Pct'] = csat_grouped.apply(
+                    lambda x: f"{x['Qtd']} ({(x['Qtd']/x['Total_Motivo']*100):.0f}%)", axis=1
+                )
+                
+                fig_csat_vol = px.bar(
+                    csat_grouped, 
+                    x="Qtd", # Para barras horizontais empilhadas, X é a quantidade
                     y="Motivo de Contato", 
                     color="Nota Label", 
-                    barmode="stack",
-                    text_auto=True,
+                    text="Label_Pct",
+                    orientation='h', # Barras deitadas facilitam a leitura dos textos
                     category_orders={"Nota Label": ["1", "2", "3", "4", "5"]},
                     color_discrete_map={"1": "#FF4B4B", "2": "#FF8C00", "3": "#FFD700", "4": "#9ACD32", "5": "#008000"}
                 )
@@ -395,56 +408,95 @@ if 'df_final' in st.session_state:
 
     with tab_equipe:
         st.subheader("Performance do Time")
+        
+        # --- GRÁFICO 1: RANKING GERAL COM PORCENTAGEM ---
         vol_por_agente = df['Atendente'].value_counts().reset_index()
         vol_por_agente.columns = ['Agente', 'Volume']
+        
+        total_geral_agentes = vol_por_agente['Volume'].sum()
+        vol_por_agente['Label'] = vol_por_agente['Volume'].apply(
+            lambda x: f"{x} ({(x/total_geral_agentes*100):.1f}%)"
+        )
+        
         c1, c2 = st.columns([2, 1])
-        c1.plotly_chart(px.bar(vol_por_agente, x='Agente', y='Volume', title="Volume de Conversas por Agente", text_auto=True), use_container_width=True)
+        c1.plotly_chart(
+            px.bar(vol_por_agente, x='Agente', y='Volume', title="Volume de Conversas por Agente", text='Label'), 
+            use_container_width=True
+        )
+        
         c2.write("Ranking:")
-        c2.dataframe(vol_por_agente, hide_index=True, use_container_width=True)
+        c2.dataframe(vol_por_agente[['Agente', 'Volume']], hide_index=True, use_container_width=True)
+        
         st.divider()
         st.subheader("🕵️ Detalhe por Agente")
         
         opcoes_cruzamento = ["Status do atendimento"] + [c for c in cols_usuario if c != "Status do atendimento"]
-        
         cruzamento_agente = st.selectbox("Cruzar Atendente com:", opcoes_cruzamento, key="sel_cruzamento_agente")
         
         if cruzamento_agente in df.columns:
             df_agente_cross = df.dropna(subset=[cruzamento_agente])
-            fig_ag = px.histogram(df_agente_cross, x="Atendente", color=cruzamento_agente, barmode="group", text_auto=True)
+            
+            # --- GRÁFICO 2: DETALHE COLORIDO COM PORCENTAGEM ---
+            # Agrupamos para calcular a porcentagem DENTRO da barra de cada agente
+            agrupado = df_agente_cross.groupby(["Atendente", cruzamento_agente]).size().reset_index(name='Qtd')
+            
+            # Calcula o total de cada agente para saber quanto aquele pedacinho representa do total dele
+            agrupado['Total_Agente'] = agrupado.groupby("Atendente")['Qtd'].transform('sum')
+            
+            # Cria a etiqueta: "10 (20%)"
+            agrupado['Label'] = agrupado.apply(
+                lambda x: f"{x['Qtd']} ({(x['Qtd'] / x['Total_Agente'] * 100):.1f}%)", axis=1
+            )
+            
+            fig_ag = px.bar(
+                agrupado, 
+                x="Atendente", 
+                y="Qtd", 
+                color=cruzamento_agente, 
+                text="Label",
+                title=f"Distribuição de {cruzamento_agente} por Agente"
+            )
             st.plotly_chart(fig_ag, use_container_width=True)
 
     with tab_cruzamento:
-        st.info("Relação entre os campos.")
+        st.info("Relação entre os campos (Porcentagem relativa ao total da barra).")
         has_motivo = "Motivo de Contato" in df.columns
         has_status = "Status do atendimento" in df.columns
         has_tipo = "Tipo de Atendimento" in df.columns
         has_expansao = COL_EXPANSAO in df.columns
         
+        # Função auxiliar para gerar gráfico empilhado com %
+        def plot_empilhado_pct(df_input, col_y, col_color, title):
+            # 1. Conta
+            grouped = df_input.groupby([col_y, col_color]).size().reset_index(name='Qtd')
+            # 2. Calcula total da barra (para a %)
+            grouped['Total_Grupo'] = grouped.groupby(col_y)['Qtd'].transform('sum')
+            # 3. Formata texto
+            grouped['Label'] = grouped.apply(lambda x: f"{x['Qtd']} ({(x['Qtd']/x['Total_Grupo']*100):.0f}%)", axis=1)
+            # 4. Plota
+            fig = px.bar(grouped, y=col_y, x='Qtd', color=col_color, text='Label', orientation='h', title=title, height=600)
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            return fig
+
         if has_motivo and has_status:
             st.subheader("Status x Motivo")
             df_cross = df.dropna(subset=["Motivo de Contato", "Status do atendimento"])
-            fig_cross = px.histogram(df_cross, y="Motivo de Contato", color="Status do atendimento", 
-                                     barmode="stack", text_auto=True, height=600)
-            fig_cross.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_cross, use_container_width=True)
+            fig1 = plot_empilhado_pct(df_cross, "Motivo de Contato", "Status do atendimento", "Status por Motivo")
+            st.plotly_chart(fig1, use_container_width=True)
             st.divider()
 
         if has_motivo and has_tipo:
             st.subheader("Tipo de Atendimento x Motivo")
             df_cross2 = df.dropna(subset=["Motivo de Contato", "Tipo de Atendimento"])
-            fig_cross2 = px.histogram(df_cross2, y="Motivo de Contato", color="Tipo de Atendimento", 
-                                     barmode="stack", text_auto=True, height=600)
-            fig_cross2.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_cross2, use_container_width=True)
+            fig2 = plot_empilhado_pct(df_cross2, "Motivo de Contato", "Tipo de Atendimento", "Tipo por Motivo")
+            st.plotly_chart(fig2, use_container_width=True)
             st.divider()
 
         if has_motivo and has_expansao:
             st.subheader(f"{COL_EXPANSAO} x Motivo")
             df_cross3 = df.dropna(subset=["Motivo de Contato", COL_EXPANSAO])
-            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color=COL_EXPANSAO, 
-                                     barmode="stack", text_auto=True, height=600)
-            fig_cross3.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_cross3, use_container_width=True)
+            fig3 = plot_empilhado_pct(df_cross3, "Motivo de Contato", COL_EXPANSAO, "Expansão por Motivo")
+            st.plotly_chart(fig3, use_container_width=True)
 
     with tab_motivos:
         st.markdown("### 🔗 Análise Unificada de Motivos")
@@ -457,18 +509,29 @@ if 'df_final' in st.session_state:
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
             ranking_global = ranking_global.sort_values(by="Incidência Total", ascending=True)
             
+            # CÁLCULO DA PORCENTAGEM
+            total_motivos = ranking_global["Incidência Total"].sum()
+            ranking_global["Label"] = ranking_global["Incidência Total"].apply(
+                lambda x: f"{x} ({(x/total_motivos*100):.1f}%)"
+            )
+            
             c_rank1, c_rank2 = st.columns([2, 1])
             with c_rank1:
                 altura_dinamica = max(400, len(ranking_global) * 30)
                 
-                fig_global = px.bar(ranking_global, x="Incidência Total", y="Motivo Unificado", 
-                                    orientation='h', text_auto=True, 
-                                    title="Todos os Motivos (Somando Motivo 1 + 2)",
-                                    height=altura_dinamica)
+                fig_global = px.bar(
+                    ranking_global, 
+                    x="Incidência Total", 
+                    y="Motivo Unificado", 
+                    orientation='h', 
+                    text="Label", # Usamos nossa etiqueta nova
+                    title="Todos os Motivos (Somando Motivo 1 + 2)",
+                    height=altura_dinamica
+                )
                 fig_global.update_layout(yaxis={'type': 'category'})
                 st.plotly_chart(fig_global, use_container_width=True)
             with c_rank2:
-                st.dataframe(ranking_global.sort_values(by="Incidência Total", ascending=False), use_container_width=True, hide_index=True)
+                st.dataframe(ranking_global.sort_values(by="Incidência Total", ascending=False)[["Motivo Unificado", "Incidência Total"]], use_container_width=True, hide_index=True)
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
