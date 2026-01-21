@@ -407,10 +407,12 @@ if 'df_final' in st.session_state:
         
         with col_v1:
             if coluna_1 != "(Todos)":
-                opcoes_1 = sorted(df_view[coluna_1].dropna().unique().tolist())
+                # AQUI: Adicionei .astype(str) pra garantir que não quebre ao ordenar
+                opcoes_1 = sorted(df_view[coluna_1].astype(str).unique().tolist())
                 valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1, key="filtro_valores_1")
                 if valores_1:
-                    df_view = df_view[df_view[coluna_1].isin(valores_1)]
+                    # AQUI: Também filtro transformando em string pra ser seguro
+                    df_view = df_view[df_view[coluna_1].astype(str).isin(valores_1)]
 
         # NÍVEL 2
         if coluna_1 != "(Todos)":
@@ -426,15 +428,14 @@ if 'df_final' in st.session_state:
 
             with col_v2:
                 if coluna_2 != "(Nenhum)":
-                    opcoes_2 = sorted(df_view[coluna_2].dropna().unique().tolist())
+                    # AQUI: O Segredo! .astype(str) e chave dinâmica
+                    opcoes_2 = sorted(df_view[coluna_2].astype(str).unique().tolist())
                     
-                    # --- AQUI ESTÁ A CORREÇÃO DA CHAVE DINÂMICA ---
-                    # A chave agora muda se a coluna mudar. Isso evita conflitos.
                     key_dinamica = f"filtro_valores_v2_{coluna_2}"
                     
                     valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=key_dinamica)
                     if valores_2:
-                        df_view = df_view[df_view[coluna_2].isin(valores_2)]
+                         df_view = df_view[df_view[coluna_2].astype(str).isin(valores_2)]
 
         # --- Exibição da Tabela ---
         st.divider()
