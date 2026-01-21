@@ -527,13 +527,23 @@ if 'df_final' in st.session_state:
         st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
-        cols_display = ["Data", "Atendente", "Link"] + cols_usuario
-        cols_display = [c for c in cols_display if c in df_view.columns]
+        # Lista de colunas que você quer que apareçam SEMPRE
+        fixas = ["Data", "Atendente", "CSAT Nota", "CSAT Comentario", "Link"]
+        
+        # Garante que elas existem no DataFrame antes de tentar mostrar
+        fixas_existentes = [c for c in fixas if c in df_view.columns]
+        
+        # Remove duplicatas caso você também tenha selecionado elas no filtro
+        extras = [c for c in cols_usuario if c not in fixas_existentes]
+        
+        cols_display = fixas_existentes + extras
 
         st.dataframe(
             df_view[cols_display], 
             use_container_width=True,
             column_config={
-                "Link": st.column_config.LinkColumn("Link", display_text="Abrir")
+                "Link": st.column_config.LinkColumn("Link", display_text="🔗 Abrir"),
+                "CSAT Nota": st.column_config.NumberColumn("CSAT", format="%d ⭐"), # Formatação bonitinha opcional
+                "CSAT Comentario": st.column_config.TextColumn("Comentário", width="medium")
             }
         )
