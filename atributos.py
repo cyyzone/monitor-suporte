@@ -26,7 +26,7 @@ WORKSPACE_ID = "xwvpdtlu" # Substitua pelo ID do seu workspace Intercom
 try:
     INTERCOM_ACCESS_TOKEN = st.secrets["INTERCOM_TOKEN"]
 except:
-    INTERCOM_ACCESS_TOKEN = st.sidebar.text_input("Intercom Token", type="password")
+    INTERCOM_ACCESS_TOKEN = st.sidebar.text_input("Intercom Token", type="password", key="intercom_token_input")
 
 if not INTERCOM_ACCESS_TOKEN:
     st.warning("⚠️ Configure o Token para continuar.")
