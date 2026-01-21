@@ -370,27 +370,55 @@ if 'df_final' in st.session_state:
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
-        # --- NOVO: Filtro Dinâmico por Coluna ---
+        # --- FILTROS EM CASCATA (Nível 1 e Nível 2) ---
         st.divider()
-        st.caption("🔎 Filtrar Conteúdo Específico")
+        st.caption("🔎 Filtros Avançados (Cascata)")
         
-        col_filtro, col_valores = st.columns(2)
+        # === NÍVEL 1 ===
+        col_f1, col_v1 = st.columns(2)
+        with col_f1:
+            # Padrão: Tenta selecionar "Tipo de Atendimento" se existir, senão pega o primeiro
+            idx_tipo = 0
+            if "Tipo de Atendimento" in cols_usuario:
+                idx_tipo = cols_usuario.index("Tipo de Atendimento") + 1
+            
+            coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=idx_tipo)
         
-        with col_filtro:
-            # Lista apenas as colunas que o usuário selecionou no sidebar
-            coluna_escolhida = st.selectbox("Filtrar pela coluna:", ["(Mostrar Tudo)"] + cols_usuario)
-        
-        with col_valores:
-            if coluna_escolhida != "(Mostrar Tudo)":
-                opcoes = df_view[coluna_escolhida].dropna().unique()
-                valores_filtrados = st.multiselect(f"Valores em '{coluna_escolhida}':", options=opcoes)
+        with col_v1:
+            filtro_ativo_1 = False
+            if coluna_1 != "(Todos)":
+                opcoes_1 = df_view[coluna_1].dropna().unique()
+                valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1)
+                if valores_1:
+                    df_view = df_view[df_view[coluna_1].isin(valores_1)]
+                    filtro_ativo_1 = True
+
+        # === NÍVEL 2 (Só aparece se o Nível 1 estiver ativo ou selecionado) ===
+        if coluna_1 != "(Todos)":
+            st.markdown("⬇️ *E dentro destes resultados...*")
+            col_f2, col_v2 = st.columns(2)
+            
+            with col_f2:
+                # Remove a coluna já usada no nível 1 das opções
+                cols_restantes = [c for c in cols_usuario if c != coluna_1]
                 
-                if valores_filtrados:
-                    df_view = df_view[df_view[coluna_escolhida].isin(valores_filtrados)]
-            else:
-                st.info("Selecione uma coluna ao lado para habilitar o filtro.")
+                # Tenta pré-selecionar "Motivo de Contato" para facilitar sua vida
+                idx_motivo = 0
+                if "Motivo de Contato" in cols_restantes:
+                    idx_motivo = cols_restantes.index("Motivo de Contato") + 1
+
+                coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=idx_motivo)
+
+            with col_v2:
+                if coluna_2 != "(Nenhum)":
+                    # IMPORTANTE: As opções aqui vêm do df_view JÁ FILTRADO pelo nível 1
+                    opcoes_2 = df_view[coluna_2].dropna().unique()
+                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2)
+                    if valores_2:
+                        df_view = df_view[df_view[coluna_2].isin(valores_2)]
 
         # --- Exibição da Tabela ---
+        st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
         cols_display = ["Data", "Atendente", "Link"] + cols_usuario
