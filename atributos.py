@@ -532,9 +532,13 @@ if 'df_final' in st.session_state:
                 st.plotly_chart(fig_time_motivo, use_container_width=True)
 
     with tab_tabela:
+        # Verificação de Segurança
         if "CSAT Nota" not in df.columns:
-            st.warning("⚠️ Cache antigo. Limpe o cache.")
-            st.stop()
+            st.warning("⚠️ As colunas de CSAT não aparecem porque os dados na memória são antigos.")
+            st.info("👉 Clique em 'Limpar Cache' e depois em 'Gerar Dados' para atualizar.")
+            st.stop() 
+
+        # Linha de cima: Checkboxes e Botão Download
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
@@ -544,12 +548,64 @@ if 'df_final' in st.session_state:
             excel_data = gerar_excel_multias(df, cols_usuario)
             st.download_button("📥 Baixar Excel", data=excel_data, file_name="relatorio_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
+        # Início da filtragem
         df_view = df.copy()
+        
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
         st.divider()
-        # Filtros e Tabela (mantidos igual ao último código funcional)
+        st.caption("🔎 Filtros Avançados (Cascata)")
+        
+        # --- LÓGICA DOS FILTROS EM CASCATA ---
+        
+        # NÍVEL 1 (Filtro Principal)
+        col_f1, col_v1 = st.columns(2)
+        with col_f1:
+            coluna_1 = st.selectbox(
+                "1º Filtro (Principal):", 
+                ["(Todos)"] + cols_usuario, 
+                index=0, 
+                key="filtro_coluna_1"
+            )
+        
+        with col_v1:
+            if coluna_1 != "(Todos)":
+                # Ordena e converte para string para evitar erros
+                opcoes_1 = sorted(df_view[coluna_1].astype(str).unique().tolist())
+                valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1, key="filtro_valores_1")
+                if valores_1:
+                    df_view = df_view[df_view[coluna_1].astype(str).isin(valores_1)]
+
+        # NÍVEL 2 (Filtro de Refinamento)
+        if coluna_1 != "(Todos)":
+            st.markdown("⬇️ *E dentro destes resultados...*")
+            col_f2, col_v2 = st.columns(2)
+            
+            with col_f2:
+                # Remove a coluna já usada no nível 1 para não repetir
+                cols_restantes = [c for c in cols_usuario if c != coluna_1]
+                
+                coluna_2 = st.selectbox(
+                    "2º Filtro (Refinamento):", 
+                    ["(Nenhum)"] + cols_restantes, 
+                    index=0, 
+                    key="filtro_coluna_2"
+                )
+
+            with col_v2:
+                if coluna_2 != "(Nenhum)":
+                    opcoes_2 = sorted(df_view[coluna_2].astype(str).unique().tolist())
+                    
+                    # Chave dinâmica para recriar o widget corretamente se mudar a coluna
+                    key_dinamica = f"filtro_valores_v2_{coluna_2}"
+                    
+                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=key_dinamica)
+                    if valores_2:
+                         df_view = df_view[df_view[coluna_2].astype(str).isin(valores_2)]
+
+        # --- EXIBIÇÃO DA TABELA FINAL ---
+        st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
         fixas = ["Data", "Atendente", "Tempo Resolução (min)", "CSAT Nota", "Link"]
