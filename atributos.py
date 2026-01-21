@@ -1,5 +1,4 @@
-import streamlit as st
-import pandas as pd
+import streamlit as st 
 import requests
 import time
 import plotly.express as px
@@ -7,21 +6,22 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 # --- IMPORTAÇÃO DO UTILS ---
-try:
+try: #  Tenta importar a função de verificação de senha
     from utils import check_password
-except ImportError:
+except ImportError: # Se falhar, exibe uma mensagem de erro e para a execução
     st.error("Arquivo utils.py não encontrado. Certifique-se de que ele está na mesma pasta.")
     st.stop()
 
 # --- CONFIGURAÇÕES ---
+# Configura o nome da aba no navegador e o icone.
 st.set_page_config(page_title="Relatório de Atributos Intercom", page_icon="📊", layout="wide")
 
 # --- BLOQUEIO DE SENHA ---
-if not check_password():
+if not check_password(): #  Se a senha não for correta, para a execução
     st.stop()
 
-WORKSPACE_ID = "xwvpdtlu"
-
+WORKSPACE_ID = "xwvpdtlu" # Substitua pelo ID do seu workspace Intercom
+# --- AUTENTICAÇÃO INTERCOM ---
 try:
     INTERCOM_ACCESS_TOKEN = st.secrets["INTERCOM_TOKEN"]
 except:
@@ -31,57 +31,57 @@ if not INTERCOM_ACCESS_TOKEN:
     st.warning("⚠️ Configure o Token para continuar.")
     st.stop()
 
-HEADERS = {
+HEADERS = { # Cabeçalhos para autenticação na API do Intercom
     "Authorization": f"Bearer {INTERCOM_ACCESS_TOKEN}",
     "Accept": "application/json"
 }
 
 # --- FUNÇÕES ---
-
-@st.cache_data(ttl=3600)
-def get_attribute_definitions():
+#
+@st.cache_data(ttl=3600) # Cacheia o resultado por 1 hora
+def get_attribute_definitions(): # Busca os nomes bonitos dos atributos
     """Busca os nomes bonitos dos atributos"""
     url = "https://api.intercom.io/data_attributes"
     params = {"model": "conversation"}
     try:
-        r = requests.get(url, headers=HEADERS, params=params)
+        r = requests.get(url, headers=HEADERS, params=params) # Requisição GET com parâmetros
         return {item['name']: item['label'] for item in r.json().get('data', [])}
     except:
         return {}
 
-@st.cache_data(ttl=3600)
-def get_all_admins():
+@st.cache_data(ttl=3600) # Cacheia o resultado por 1 hora
+def get_all_admins(): # Busca a lista de todos os agentes (ID -> Nome)
     """Busca a lista de todos os agentes (ID -> Nome)"""
     url = "https://api.intercom.io/admins"
     try:
-        r = requests.get(url, headers=HEADERS)
+        r = requests.get(url, headers=HEADERS) # Requisição GET
         return {str(a['id']): a['name'] for a in r.json().get('admins', [])}
     except:
         return {}
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_conversations(start_date, end_date, team_ids=None):
+@st.cache_data(ttl=300, show_spinner=False) # Cacheia o resultado por 5 minutos
+def fetch_conversations(start_date, end_date, team_ids=None): # Busca conversas no período e times especificados
     url = "https://api.intercom.io/conversations/search"
-    ts_start = int(datetime.combine(start_date, datetime.min.time()).timestamp())
-    ts_end = int(datetime.combine(end_date, datetime.max.time()).timestamp())
+    ts_start = int(datetime.combine(start_date, datetime.min.time()).timestamp()) # Início do dia
+    ts_end = int(datetime.combine(end_date, datetime.max.time()).timestamp()) # Fim do dia
     
     query_rules = [
-        {"field": "created_at", "operator": ">", "value": ts_start},
-        {"field": "created_at", "operator": "<", "value": ts_end}
+        {"field": "created_at", "operator": ">", "value": ts_start}, # Início do período
+        {"field": "created_at", "operator": "<", "value": ts_end} # Fim do período
     ]
     
     if team_ids:
-        query_rules.append({"field": "team_assignee_id", "operator": "IN", "value": team_ids})
+        query_rules.append({"field": "team_assignee_id", "operator": "IN", "value": team_ids}) # Filtra por times se fornecido
 
     payload = {
-        "query": {"operator": "AND", "value": query_rules},
+        "query": {"operator": "AND", "value": query_rules}, # Regras de consulta
         "pagination": {"per_page": 150}
     }
     
-    conversas = []
-    has_more = True
-    status_text = st.empty()
-    
+    conversas = [] # Lista para armazenar conversas
+    has_more = True # Controle de paginação
+    status_text = st.empty() # Espaço para status de download
+     # Loop: enquanto tiver paginas, continua buscando.
     while has_more:
         try:
             resp = requests.post(url, headers=HEADERS, json=payload)
@@ -241,7 +241,7 @@ if 'df_final' in st.session_state:
     # --- RESUMO EXECUTIVO ---
     st.markdown("### 📌 Resumo do Período")
     
-    # AQUI: Mudamos a proporção das colunas. 
+   
     # [1, 1, 1, 1.5] dá mais espaço para a última coluna (Principal Motivo)
     kpi1, kpi2, kpi3, kpi4 = st.columns([1, 1, 1, 1.5])
     
@@ -316,7 +316,7 @@ if 'df_final' in st.session_state:
         st.divider()
         st.subheader("🕵️ Detalhe por Agente")
         
-        # --- CORREÇÃO DA DUPLICIDADE ---
+        
         # Cria uma lista começando com "Status", adiciona os outros, e remove duplicados mantendo a ordem.
         opcoes_cruzamento = ["Status do atendimento"] + [c for c in cols_usuario if c != "Status do atendimento"]
         
