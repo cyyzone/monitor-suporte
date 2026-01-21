@@ -366,11 +366,21 @@ if 'df_final' in st.session_state:
                 contagem = df_clean[graf_sel].value_counts().reset_index()
                 contagem.columns = ["Opção", "Quantidade"]
                 
+                # --- CÓDIGO NOVO COMEÇA AQUI ---
+                
+                # 1. Calculamos o total de registros visíveis
+                total_registros = contagem["Quantidade"].sum()
+                
+                # 2. Criamos uma coluna nova com o texto formatado: "145 (73.2%)"
+                contagem["Texto_Label"] = contagem["Quantidade"].apply(
+                    lambda x: f"{x} ({(x / total_registros * 100):.1f}%)"
+                )
+                
                 fig_bar = px.bar(
                     contagem, 
                     x="Opção", 
                     y="Quantidade", 
-                    text_auto=True,
+                    text="Texto_Label", # Trocamos 'text_auto=True' pela nossa coluna personalizada
                     title=f"Distribuição: {graf_sel}"
                 )
                 
