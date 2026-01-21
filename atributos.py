@@ -202,7 +202,16 @@ if btn_run:
         if raw:
             df = process_data(raw, mapa, admins_map)
             st.session_state['df_final'] = df
-            st.success(f"Sucesso! {len(df)} conversas carregadas.")
+            
+            # --- ALTERAÇÃO AQUI ---
+            # Em vez de st.success() solto na tela, usamos toast (notificação) ou sidebar
+            # Isso evita que o layout "pule" quando a mensagem sumir.
+            try:
+                st.toast(f"✅ Sucesso! {len(df)} conversas carregadas.")
+            except:
+                st.sidebar.success(f"✅ Sucesso! {len(df)} conversas carregadas.")
+            # ----------------------
+            
         else:
             st.warning("Nenhum dado encontrado.")
 
