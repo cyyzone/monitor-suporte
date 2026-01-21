@@ -124,29 +124,25 @@ def process_data(conversas, mapping, admin_map):
         csat_score = rating_data.get('rating') 
         csat_comment = rating_data.get('remark')
         
-        # --- NOVO: CÁLCULO DE TEMPOS (SLA) COM FALLBACK ---
+        # --- NOVO: CÁLCULO DE TEMPOS EM DIAS (SLA) ---
         stats = c.get('statistics') or {}
         
-        # 1. Tempo para primeira resposta (SLA de Resposta)
+        # 1. Tempo para primeira resposta (Converter para DIAS)
         time_reply_sec = stats.get('time_to_admin_reply')
-        time_reply_min = round(time_reply_sec / 60, 1) if time_reply_sec else None
+        # 86400 segundos = 1 dia
+        time_reply_days = round(time_reply_sec / 86400, 4) if time_reply_sec else None
         
-        # 2. Tempo total para resolução (SLA de Resolução)
+        # 2. Tempo total para resolução (Converter para DIAS)
         time_close_sec = stats.get('time_to_close')
         
-        # --- O SEGREDO ESTÁ AQUI (FALLBACK) ---
-        # Se o Intercom mandou vazio (None), mas a conversa tem data de fechamento (last_close_at),
-        # nós calculamos manualmente a diferença.
+        # Fallback: Se não vier pronto, calcula (Fechamento - Criação)
         if not time_close_sec:
-            last_close_at = stats.get('last_close_at') # Timestamp do fechamento
+            last_close_at = stats.get('last_close_at')
             created_at = c.get('created_at')
-            
             if last_close_at and created_at:
-                # Calcula a diferença bruta
                 time_close_sec = last_close_at - created_at
         
-        # Converte para minutos se tivermos algum valor (seja oficial ou calculado)
-        time_close_min = round(time_close_sec / 60, 1) if time_close_sec else None
+        time_close_days = round(time_close_sec / 86400, 4) if time_close_sec else None
         # -----------------------------
 
         row = {
@@ -158,8 +154,8 @@ def process_data(conversas, mapping, admin_map):
             "Link": link,
             "CSAT Nota": csat_score,
             "CSAT Comentario": csat_comment,
-            "Tempo Resposta (min)": time_reply_min,
-            "Tempo Resolução (min)": time_close_min
+            "Tempo Resposta (dias)": time_reply_days,  # Alterado para dias
+            "Tempo Resolução (dias)": time_close_days  # Alterado para dias
         }
         
         attrs = c.get('custom_attributes', {})
@@ -183,20 +179,6 @@ def process_data(conversas, mapping, admin_map):
         
     return df
 
-def format_human_time(minutes):
-    """Converte minutos em Texto (Min, Horas ou Dias)"""
-    if not minutes or pd.isna(minutes) or minutes == 0:
-        return "-"
-    
-    if minutes < 60:
-        return f"{minutes:.0f} min"
-    elif minutes < 1440: # Menos de 24h (1440 min)
-        hours = minutes / 60
-        return f"{hours:.1f} h"
-    else:
-        days = minutes / 1440
-        return f"{days:.1f} dias"
-
 def gerar_excel_multias(df, colunas_selecionadas):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -214,8 +196,8 @@ def gerar_excel_multias(df, colunas_selecionadas):
                     pass
 
         # 2. Aba Base Completa
-        # Adicionei colunas de tempo na exportação
-        cols_fixas = ["Data", "Atendente", "Tempo Resposta (min)", "Tempo Resolução (min)", "CSAT Nota", "CSAT Comentario", "Link", "Qtd. Atributos"]
+        # Atualizado para colunas em DIAS
+        cols_fixas = ["Data", "Atendente", "Tempo Resposta (dias)", "Tempo Resolução (dias)", "CSAT Nota", "CSAT Comentario", "Link", "Qtd. Atributos"]
         cols_extras = [c for c in colunas_selecionadas if c not in cols_fixas]
         cols_finais = cols_fixas + cols_extras
         
@@ -253,7 +235,6 @@ if btn_run:
         raw = fetch_conversations(start, end, ids_times)
         
         # 2. Busca Período Anterior (Para Delta)
-        # Calcula quantos dias tem no intervalo selecionado
         delta_days = (end - start).days + 1
         prev_end = start - timedelta(days=1)
         prev_start = prev_end - timedelta(days=delta_days - 1)
@@ -265,7 +246,7 @@ if btn_run:
             df_prev = process_data(raw_prev, mapa, admins_map) if raw_prev else pd.DataFrame()
             
             st.session_state['df_final'] = df
-            st.session_state['df_prev'] = df_prev # Salva o anterior na memória tbm
+            st.session_state['df_prev'] = df_prev 
             
             try:
                 st.toast(f"✅ Sucesso! {len(df)} conversas carregadas.")
@@ -288,17 +269,18 @@ if 'df_final' in st.session_state:
     sugestao = ["Tipo de Atendimento", COL_EXPANSAO, "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
+    colunas_ignorar = ["ID", "timestamp_real", "Data", "Data_Dia", "Link", "Qtd. Atributos", "Atendente", "CSAT Nota", "CSAT Comentario", "Tempo Resposta (dias)", "Tempo Resolução (dias)"]
+    
     cols_usuario = st.multiselect(
         "Selecione os atributos para análise:",
-        options=[c for c in todas_colunas if c not in ["ID", "timestamp_real", "Data", "Data_Dia", "Link", "Qtd. Atributos", "Atendente", "CSAT Nota", "CSAT Comentario", "Tempo Resposta (min)", "Tempo Resolução (min)"]],
+        options=[c for c in todas_colunas if c not in colunas_ignorar],
         default=padrao_existente,
         key="seletor_colunas_principal"
     )
 
     # --- CÁLCULO DE COMPLEXIDADE ---
     if cols_usuario:
-        ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID", "CSAT Nota", "CSAT Comentario", "Tempo Resposta (min)", "Tempo Resolução (min)"]
-        cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
+        cols_para_contar = [c for c in cols_usuario if c not in colunas_ignorar + ["Status do atendimento", "Tipo de Atendimento"]]
         
         if cols_para_contar:
             df["Qtd. Atributos"] = df[cols_para_contar].notna().sum(axis=1)
@@ -315,13 +297,11 @@ if 'df_final' in st.session_state:
     # KPIs Atuais
     total_conv = len(df)
     preenchidos = df["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df.columns else 0
-    taxa_classif = (preenchidos / total_conv * 100) if total_conv > 0 else 0
     
     # KPIs Anteriores (Para Delta)
     total_conv_prev = len(df_prev)
     preenchidos_prev = df_prev["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df_prev.columns else 0
     
-    # Cálculos de Delta
     delta_total = total_conv - total_conv_prev
     delta_preenchidos = preenchidos - preenchidos_prev
     
@@ -334,42 +314,36 @@ if 'df_final' in st.session_state:
     
     delta_resolvidos = resolvidos - resolvidos_prev
     
-    # KPI 4: Tempo Médio de Resolução
-    tempo_medio = df["Tempo Resolução (min)"].mean() if "Tempo Resolução (min)" in df.columns else 0
-    tempo_medio_prev = df_prev["Tempo Resolução (min)"].mean() if not df_prev.empty and "Tempo Resolução (min)" in df_prev.columns else 0
+    # KPI 4: Tempo Médio de Resolução (AGORA EM DIAS)
+    col_tempo = "Tempo Resolução (dias)"
+    tempo_medio = df[col_tempo].mean() if col_tempo in df.columns else 0
+    tempo_medio_prev = df_prev[col_tempo].mean() if not df_prev.empty and col_tempo in df_prev.columns else 0
+    
     delta_tempo_val = tempo_medio - tempo_medio_prev
     
-    # Formata os valores para texto bonito (dias/horas)
-    tempo_str = format_human_time(tempo_medio)
-    delta_str = format_human_time(abs(delta_tempo_val)) # abs para tirar o sinal negativo do texto
+    # Formatação de texto para o KPI
+    def fmt_days(val): return f"{val:.2f} dias"
     
-    # Adiciona sinal + ou - manual no texto do delta
-    if delta_tempo_val > 0:
-        delta_str = f"🔺 {delta_str} (piorou)"
-    elif delta_tempo_val < 0:
-        delta_str = f"🔻 {delta_str} (melhorou)"
-    else:
-        delta_str = None
+    delta_str = fmt_days(abs(delta_tempo_val))
+    if delta_tempo_val > 0: delta_str = f"🔺 {delta_str} (piorou)"
+    elif delta_tempo_val < 0: delta_str = f"🔻 {delta_str} (melhorou)"
+    else: delta_str = None
 
     kpi1.metric("Total Conversas", total_conv, delta=delta_total)
     kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
     kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
     
-    # KPI formatado
     kpi4.metric(
         "Tempo Médio Resolução", 
-        tempo_str, 
-        delta=delta_tempo_val, # O Streamlit usa o valor numérico para definir a cor (verde/vermelho)
-        delta_color="inverse"  # inverse: se o tempo subiu, fica vermelho (ruim)
+        fmt_days(tempo_medio), 
+        delta=delta_tempo_val, 
+        delta_color="inverse"
     )
 
     st.divider()
 
     # --- ABAS DE ANÁLISE ---
     tab_grafico, tab_equipe, tab_cruzamento, tab_motivos, tab_csat, tab_tempo, tab_tabela = st.tabs(["📊 Distribuição", "👥 Equipe", "🔀 Cruzamentos", "🔗 Motivo x Motivo", "⭐ CSAT", "⏱️ Tempo & SLA", "📋 Detalhes & Export"])
-
-    # ... [ABAS EXISTENTES] ... 
-    # (Mantendo o código otimizado que já fizemos)
 
     with tab_grafico:
         c1, c2 = st.columns([2, 1])
@@ -446,7 +420,6 @@ if 'df_final' in st.session_state:
                 st.dataframe(ranking_global, use_container_width=True, hide_index=True)
 
     with tab_csat:
-        # (Código CSAT mantido igual)
         if "CSAT Nota" not in df.columns:
              st.warning("Gere os dados novamente.")
         else:
@@ -463,82 +436,69 @@ if 'df_final' in st.session_state:
                     fig_csat_avg.update_layout(coloraxis_showscale=False)
                     st.plotly_chart(fig_csat_avg, use_container_width=True)
 
-    # --- NOVA ABA: TEMPO & SLA ---
+    # --- ABA: TEMPO & SLA (EM DIAS) ---
     with tab_tempo:
-        st.header("⏱️ Análise de Tempo e SLA")
+        st.header("⏱️ Análise de Tempo e SLA (em Dias)")
+        
+        col_res = "Tempo Resolução (dias)"
+        col_rep = "Tempo Resposta (dias)"
         
         # Filtra dados com tempo de resolução
-        df_tempo = df.dropna(subset=["Tempo Resolução (min)"])
+        df_tempo = df.dropna(subset=[col_res])
         
         if df_tempo.empty:
             st.warning("Não há dados de tempo de resolução disponíveis.")
         else:
-            # Cards de Resumo Interno
             t1, t2, t3 = st.columns(3)
-            med_resol = df_tempo["Tempo Resolução (min)"].mean()
-            med_resp = df_tempo["Tempo Resposta (min)"].mean()
+            med_resol = df_tempo[col_res].mean()
+            med_resp = df_tempo[col_rep].mean()
             
-            # Usamos a função aqui também
-            t1.metric("Tempo Médio de Resolução", format_human_time(med_resol))
-            t2.metric("Tempo Médio 1ª Resposta", format_human_time(med_resp))
-            t3.metric("Conversas com dados de tempo", len(df_tempo))
+            t1.metric("Tempo Médio de Resolução", fmt_days(med_resol))
+            t2.metric("Tempo Médio 1ª Resposta", fmt_days(med_resp))
+            t3.metric("Conversas consideradas", len(df_tempo))
             
             st.divider()
             
-            # LÓGICA INTELIGENTE PARA GRÁFICOS:
-            # Se a média for maior que 3 horas (180 min), mostramos o gráfico em HORAS para facilitar a leitura
-            usar_horas = med_resol > 180
-            coluna_plot = "Tempo Resolução (min)"
-            sulfixo = "min"
-            
-            if usar_horas:
-                df_tempo["Tempo (Horas)"] = df_tempo["Tempo Resolução (min)"] / 60
-                coluna_plot = "Tempo (Horas)"
-                sulfixo = "horas"
-                st.info(f"💡 Como os tempos são longos, os gráficos abaixo foram convertidos para **Horas**.")
-
-            # Gráfico 1: Quem é mais rápido?
-            st.subheader("⚡ Velocidade por Agente")
-            tempo_agente = df_tempo.groupby("Atendente")[coluna_plot].mean().reset_index().sort_values(coluna_plot)
+            # Gráfico 1: Velocidade por Agente
+            st.subheader("⚡ Velocidade por Agente (em Dias)")
+            tempo_agente = df_tempo.groupby("Atendente")[col_res].mean().reset_index().sort_values(col_res)
             
             fig_time_agente = px.bar(
                 tempo_agente, 
-                x=coluna_plot, 
+                x=col_res, 
                 y="Atendente", 
                 orientation='h', 
-                text_auto='.1f',
-                title=f"Média de {sulfixo.capitalize()} para Resolver (Menor é melhor)"
+                text_auto='.2f', # 2 casas decimais
+                title=f"Média de Dias para Resolver (Menor é melhor)"
             )
             st.plotly_chart(fig_time_agente, use_container_width=True)
             
-            # Gráfico 2: Qual motivo demora mais?
+            # Gráfico 2: Motivos mais demorados
             if "Motivo de Contato" in df.columns:
                 st.divider()
-                st.subheader("🐢 Motivos mais demorados")
-                tempo_motivo = df_tempo.groupby("Motivo de Contato")[coluna_plot].mean().reset_index().sort_values(coluna_plot, ascending=False)
+                st.subheader("🐢 Motivos mais demorados (em Dias)")
+                tempo_motivo = df_tempo.groupby("Motivo de Contato")[col_res].mean().reset_index().sort_values(col_res, ascending=False)
                 
                 h_motivo = max(400, 100 + (len(tempo_motivo) * 30))
                 
                 fig_time_motivo = px.bar(
                     tempo_motivo, 
-                    x=coluna_plot, 
+                    x=col_res, 
                     y="Motivo de Contato", 
                     orientation='h', 
-                    text_auto='.1f',
+                    text_auto='.2f', # 2 casas decimais
                     height=h_motivo,
-                    title=f"Média de {sulfixo.capitalize()} por Motivo"
+                    title=f"Média de Dias por Motivo"
                 )
                 fig_time_motivo.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_time_motivo, use_container_width=True)
 
     with tab_tabela:
-        # Verificação de Segurança
         if "CSAT Nota" not in df.columns:
-            st.warning("⚠️ As colunas de CSAT não aparecem porque os dados na memória são antigos.")
-            st.info("👉 Clique em 'Limpar Cache' e depois em 'Gerar Dados' para atualizar.")
-            st.stop() 
-
-        # Linha de cima: Checkboxes e Botão Download
+            st.warning("⚠️ Dados antigos na memória.")
+            st.info("👉 Limpe o cache e Gere os Dados novamente.")
+            st.stop()
+        
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
@@ -548,67 +508,39 @@ if 'df_final' in st.session_state:
             excel_data = gerar_excel_multias(df, cols_usuario)
             st.download_button("📥 Baixar Excel", data=excel_data, file_name="relatorio_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
-        # Início da filtragem
         df_view = df.copy()
-        
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
         st.divider()
-        st.caption("🔎 Filtros Avançados (Cascata)")
+        st.caption("🔎 Filtros Avançados")
         
-        # --- LÓGICA DOS FILTROS EM CASCATA ---
-        
-        # NÍVEL 1 (Filtro Principal)
+        # Filtros Cascata
         col_f1, col_v1 = st.columns(2)
         with col_f1:
-            coluna_1 = st.selectbox(
-                "1º Filtro (Principal):", 
-                ["(Todos)"] + cols_usuario, 
-                index=0, 
-                key="filtro_coluna_1"
-            )
-        
+            coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=0, key="filtro_coluna_1")
         with col_v1:
             if coluna_1 != "(Todos)":
-                # Ordena e converte para string para evitar erros
                 opcoes_1 = sorted(df_view[coluna_1].astype(str).unique().tolist())
                 valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1, key="filtro_valores_1")
-                if valores_1:
-                    df_view = df_view[df_view[coluna_1].astype(str).isin(valores_1)]
+                if valores_1: df_view = df_view[df_view[coluna_1].astype(str).isin(valores_1)]
 
-        # NÍVEL 2 (Filtro de Refinamento)
         if coluna_1 != "(Todos)":
             st.markdown("⬇️ *E dentro destes resultados...*")
             col_f2, col_v2 = st.columns(2)
-            
             with col_f2:
-                # Remove a coluna já usada no nível 1 para não repetir
                 cols_restantes = [c for c in cols_usuario if c != coluna_1]
-                
-                coluna_2 = st.selectbox(
-                    "2º Filtro (Refinamento):", 
-                    ["(Nenhum)"] + cols_restantes, 
-                    index=0, 
-                    key="filtro_coluna_2"
-                )
-
+                coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=0, key="filtro_coluna_2")
             with col_v2:
                 if coluna_2 != "(Nenhum)":
                     opcoes_2 = sorted(df_view[coluna_2].astype(str).unique().tolist())
-                    
-                    # Chave dinâmica para recriar o widget corretamente se mudar a coluna
-                    key_dinamica = f"filtro_valores_v2_{coluna_2}"
-                    
-                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=key_dinamica)
-                    if valores_2:
-                         df_view = df_view[df_view[coluna_2].astype(str).isin(valores_2)]
+                    valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=f"v2_{coluna_2}")
+                    if valores_2: df_view = df_view[df_view[coluna_2].astype(str).isin(valores_2)]
 
-        # --- EXIBIÇÃO DA TABELA FINAL ---
         st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
-        fixas = ["Data", "Atendente", "Tempo Resolução (min)", "CSAT Nota", "Link"]
+        fixas = ["Data", "Atendente", "Tempo Resolução (dias)", "CSAT Nota", "Link"]
         fixas_existentes = [c for c in fixas if c in df_view.columns]
         extras = [c for c in cols_usuario if c not in fixas_existentes]
         cols_display = fixas_existentes + extras
@@ -619,6 +551,6 @@ if 'df_final' in st.session_state:
             column_config={
                 "Link": st.column_config.LinkColumn("Link", display_text="🔗 Abrir"),
                 "CSAT Nota": st.column_config.NumberColumn("CSAT", format="%d ⭐"),
-                "Tempo Resolução (min)": st.column_config.NumberColumn("Tempo (min)", format="%.1f min")
+                "Tempo Resolução (dias)": st.column_config.NumberColumn("Tempo (dias)", format="%.2f dias")
             }
         )
