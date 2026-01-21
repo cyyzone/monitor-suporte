@@ -252,7 +252,6 @@ if 'df_final' in st.session_state:
         c1, c2 = st.columns([2, 1])
         with c1:
             if cols_usuario:
-                # Aqui o usuário pode selecionar manualmente "Expansão" no dropdown
                 graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_pie")
                 df_pie = df[df[graf_sel].notna()]
                 fig_pie = px.pie(df_pie, names=graf_sel, hole=0.4, title=f"Distribuição: {graf_sel}")
@@ -263,8 +262,9 @@ if 'df_final' in st.session_state:
                 st.warning("Selecione atributos no topo.")
         with c2:
              if cols_usuario:
-                 st.write("**Ranking:**")
-                 st.dataframe(df[graf_sel].value_counts().head(10), use_container_width=True)
+                 st.write("**Ranking Completo:**")
+                 # AQUI: Removi o .head(10) para mostrar tudo
+                 st.dataframe(df[graf_sel].value_counts(), use_container_width=True)
 
     with tab_equipe:
         st.subheader("Performance do Time")
