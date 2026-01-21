@@ -355,12 +355,18 @@ if 'df_final' in st.session_state:
     tempo_str = format_sla_string(tempo_medio_seg)
     delta_str_human = format_sla_string(abs(delta_tempo_seg))
     
+    # --- CORREÇÃO AQUI ---
+    # Criamos uma string formatada para o delta, em vez de passar o número float bruto
+    delta_exibicao = None
     if delta_tempo_seg > 0: 
-        help_text = f"Piorou: +{delta_str_human}"
+        help_text = f"Piorou: Aumentou em {delta_str_human}"
+        delta_exibicao = f"{delta_str_human}" # Positivo = Vermelho (devido ao inverse)
     elif delta_tempo_seg < 0: 
-        help_text = f"Melhorou: -{delta_str_human}"
+        help_text = f"Melhorou: Diminuiu em {delta_str_human}"
+        delta_exibicao = f"-{delta_str_human}" # Negativo = Verde (devido ao inverse)
     else: 
         help_text = "Sem alteração"
+        delta_exibicao = "0s"
 
     # 4. KPI Novo: Principal Motivo
     top_motivo_txt = "N/A"
