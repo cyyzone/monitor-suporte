@@ -240,7 +240,10 @@ if 'df_final' in st.session_state:
 
     # --- RESUMO EXECUTIVO ---
     st.markdown("### 📌 Resumo do Período")
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    
+    # AQUI: Mudamos a proporção das colunas. 
+    # [1, 1, 1, 1.5] dá mais espaço para a última coluna (Principal Motivo)
+    kpi1, kpi2, kpi3, kpi4 = st.columns([1, 1, 1, 1.5])
     
     total_conv = len(df)
     preenchidos = df["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df.columns else 0
@@ -256,10 +259,19 @@ if 'df_final' in st.session_state:
     if "Status do atendimento" in df.columns:
         resolvidos = df[df["Status do atendimento"] == "Resolvido"].shape[0]
 
+    # KPIs Padrão
     kpi1.metric("Total Conversas", total_conv)
     kpi2.metric("Classificados", f"{preenchidos}", f"{taxa_classif:.1f}%")
     kpi3.metric("Resolvidos", resolvidos)
-    kpi4.metric("Principal Motivo", top_motivo.split(">")[-1].strip()) 
+    
+    # KPI Personalizado (HTML) para diminuir a fonte
+    motivo_texto = top_motivo.split(">")[-1].strip()
+    kpi4.markdown(f"""
+    <div style="font-size: 14px; color: #6c757d; margin-bottom: 4px;">Principal Motivo</div>
+    <div style="font-size: 20px; font-weight: 600; color: #31333F; line-height: 1.2;">
+        {motivo_texto}
+    </div>
+    """, unsafe_allow_html=True)
 
     st.divider()
 
