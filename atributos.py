@@ -400,18 +400,19 @@ if 'df_final' in st.session_state:
         # NÍVEL 1
         col_f1, col_v1 = st.columns(2)
         with col_f1:
-            idx_tipo = 0
-            if "Tipo de Atendimento" in cols_usuario:
-                idx_tipo = cols_usuario.index("Tipo de Atendimento") + 1
-            coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=idx_tipo, key="filtro_coluna_1")
+            # ALTERAÇÃO AQUI: Index fixo em 0 para iniciar sempre como "(Todos)"
+            coluna_1 = st.selectbox(
+                "1º Filtro (Principal):", 
+                ["(Todos)"] + cols_usuario, 
+                index=0, 
+                key="filtro_coluna_1"
+            )
         
         with col_v1:
             if coluna_1 != "(Todos)":
-                # AQUI: Adicionei .astype(str) pra garantir que não quebre ao ordenar
                 opcoes_1 = sorted(df_view[coluna_1].astype(str).unique().tolist())
                 valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1, key="filtro_valores_1")
                 if valores_1:
-                    # AQUI: Também filtro transformando em string pra ser seguro
                     df_view = df_view[df_view[coluna_1].astype(str).isin(valores_1)]
 
         # NÍVEL 2
@@ -420,17 +421,22 @@ if 'df_final' in st.session_state:
             col_f2, col_v2 = st.columns(2)
             
             with col_f2:
+                # Remove a coluna já usada no nível 1 das opções do nível 2
                 cols_restantes = [c for c in cols_usuario if c != coluna_1]
-                idx_motivo = 0
-                if "Motivo de Contato" in cols_restantes:
-                    idx_motivo = cols_restantes.index("Motivo de Contato") + 1
-                coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=idx_motivo, key="filtro_coluna_2")
+                
+                # Mantém o padrão "(Nenhum)" (index 0) para não expandir automaticamente
+                coluna_2 = st.selectbox(
+                    "2º Filtro (Refinamento):", 
+                    ["(Nenhum)"] + cols_restantes, 
+                    index=0, 
+                    key="filtro_coluna_2"
+                )
 
             with col_v2:
                 if coluna_2 != "(Nenhum)":
-                    # AQUI: O Segredo! .astype(str) e chave dinâmica
                     opcoes_2 = sorted(df_view[coluna_2].astype(str).unique().tolist())
                     
+                    # A chave dinâmica garante que o widget se recrie corretamente se a coluna mudar
                     key_dinamica = f"filtro_valores_v2_{coluna_2}"
                     
                     valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2, key=key_dinamica)
