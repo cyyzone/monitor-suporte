@@ -207,7 +207,17 @@ if 'df_final' in st.session_state:
     )
 
     if cols_usuario:
-        df["Qtd. Atributos"] = df[cols_usuario].notna().sum(axis=1)
+        # Colunas que NÃO devem contar pontos de complexidade (ajuste conforme seus nomes exatos)
+        ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data"]
+        
+        # Cria uma lista apenas com as colunas que REALMENTE importam para a contagem
+        cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
+        
+        # Calcula a soma apenas nessas colunas
+        if cols_para_contar:
+            df["Qtd. Atributos"] = df[cols_para_contar].notna().sum(axis=1)
+        else:
+            df["Qtd. Atributos"] = 0
     else:
         df["Qtd. Atributos"] = 0
 
