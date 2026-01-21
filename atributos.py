@@ -119,9 +119,11 @@ def process_data(conversas, mapping, admin_map):
         else:
             assignee_name = "Não atribuído"
 
-        # --- NOVO: CAPTURA DO CSAT ---
-        rating_data = c.get('conversation_rating', {})
-        csat_score = rating_data.get('rating') # Retorna None se não avaliou
+        # --- CORREÇÃO AQUI ---
+        # O 'or {}' garante que se vier None, virará um dicionário vazio
+        rating_data = c.get('conversation_rating') or {}
+        
+        csat_score = rating_data.get('rating') 
         csat_comment = rating_data.get('remark')
         # -----------------------------
 
@@ -132,8 +134,8 @@ def process_data(conversas, mapping, admin_map):
             "Data_Dia": datetime.fromtimestamp(c['created_at']).strftime("%Y-%m-%d"),
             "Atendente": assignee_name,
             "Link": link,
-            "CSAT Nota": csat_score,       # Nova coluna
-            "CSAT Comentario": csat_comment # Nova coluna
+            "CSAT Nota": csat_score,
+            "CSAT Comentario": csat_comment
         }
         
         attrs = c.get('custom_attributes', {})
