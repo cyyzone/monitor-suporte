@@ -198,7 +198,7 @@ if 'df_final' in st.session_state:
     # --- SELEÇÃO DE COLUNAS ---
     todas_colunas = list(df.columns)
     
-    # [ATUALIZADO] Adicionei "Expansão" na lista de sugestão padrão
+    # Expansão adicionada na sugestão
     sugestao = ["Tipo de Atendimento", "Expansão", "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
@@ -210,13 +210,9 @@ if 'df_final' in st.session_state:
 
     # --- CÁLCULO DE COMPLEXIDADE ---
     if cols_usuario:
-        # Colunas que NÃO devem contar pontos de complexidade
         ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID"]
-        
-        # Cria uma lista apenas com as colunas que REALMENTE importam para a contagem
         cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
         
-        # Calcula a soma apenas nessas colunas
         if cols_para_contar:
             df["Qtd. Atributos"] = df[cols_para_contar].notna().sum(axis=1)
         else:
@@ -256,6 +252,7 @@ if 'df_final' in st.session_state:
         c1, c2 = st.columns([2, 1])
         with c1:
             if cols_usuario:
+                # Aqui o usuário pode selecionar manualmente "Expansão" no dropdown
                 graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_pie")
                 df_pie = df[df[graf_sel].notna()]
                 fig_pie = px.pie(df_pie, names=graf_sel, hole=0.4, title=f"Distribuição: {graf_sel}")
@@ -279,6 +276,7 @@ if 'df_final' in st.session_state:
         c2.dataframe(vol_por_agente, hide_index=True, use_container_width=True)
         st.divider()
         st.subheader("🕵️ Detalhe por Agente")
+        # Aqui "Expansão" vai aparecer na lista se estiver em cols_usuario
         cruzamento_agente = st.selectbox("Cruzar Atendente com:", ["Status do atendimento"] + cols_usuario)
         if cruzamento_agente in df.columns:
             df_agente_cross = df.dropna(subset=[cruzamento_agente])
@@ -286,11 +284,13 @@ if 'df_final' in st.session_state:
             st.plotly_chart(fig_ag, use_container_width=True)
 
     with tab_cruzamento:
-        st.info("Relação entre os campos (Ex: Quais motivos são mais 'Resolvidos'?).")
+        st.info("Relação entre os campos.")
         has_motivo = "Motivo de Contato" in df.columns
         has_status = "Status do atendimento" in df.columns
-        has_tipo = "Tipo de Atendimento" in df.columns 
+        has_tipo = "Tipo de Atendimento" in df.columns
+        has_expansao = "Expansão" in df.columns  # Verifica se existe Expansão
         
+        # 1. Status x Motivo
         if has_motivo and has_status:
             st.subheader("Status x Motivo")
             df_cross = df.dropna(subset=["Motivo de Contato", "Status do atendimento"])
@@ -298,9 +298,9 @@ if 'df_final' in st.session_state:
                                      barmode="stack", text_auto=True, height=600)
             fig_cross.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross, use_container_width=True)
-        
-        st.divider()
+            st.divider()
 
+        # 2. Tipo x Motivo
         if has_motivo and has_tipo:
             st.subheader("Tipo de Atendimento x Motivo")
             df_cross2 = df.dropna(subset=["Motivo de Contato", "Tipo de Atendimento"])
@@ -308,6 +308,16 @@ if 'df_final' in st.session_state:
                                      barmode="stack", text_auto=True, height=600)
             fig_cross2.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross2, use_container_width=True)
+            st.divider()
+
+        # 3. NOVO: Expansão x Motivo (Se existir a coluna)
+        if has_motivo and has_expansao:
+            st.subheader("Expansão x Motivo")
+            df_cross3 = df.dropna(subset=["Motivo de Contato", "Expansão"])
+            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color="Expansão", 
+                                     barmode="stack", text_auto=True, height=600)
+            fig_cross3.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_cross3, use_container_width=True)
 
     with tab_motivos:
         st.markdown("### 🔗 Análise Unificada de Motivos")
@@ -360,11 +370,9 @@ if 'df_final' in st.session_state:
         
         with col_valores:
             if coluna_escolhida != "(Mostrar Tudo)":
-                # Pega valores únicos da coluna escolhida
                 opcoes = df_view[coluna_escolhida].dropna().unique()
                 valores_filtrados = st.multiselect(f"Valores em '{coluna_escolhida}':", options=opcoes)
                 
-                # Se o usuário selecionou algo, aplica o filtro
                 if valores_filtrados:
                     df_view = df_view[df_view[coluna_escolhida].isin(valores_filtrados)]
             else:
