@@ -44,25 +44,33 @@ HEADERS = {
 # --- FUNÇÕES ---
 
 def format_sla_string(seconds):
-    """Converte segundos em formato legível: 1d 2h 30m"""
+    """
+    Converte segundos em formato legível.
+    - Se for longo: 1d 2h 30m
+    - Se for curto (menos de 1h): 15m 30s
+    """
     if not seconds or pd.isna(seconds) or seconds == 0:
         return "-"
     
-    # Garante que é número
     seconds = int(seconds)
     
     days = seconds // 86400
-    seconds %= 86400
-    hours = seconds // 3600
-    seconds %= 3600
-    minutes = seconds // 60
+    rem = seconds % 86400
+    hours = rem // 3600
+    rem %= 3600
+    minutes = rem // 60
+    secs = rem % 60
     
     parts = []
     if days > 0: parts.append(f"{days}d")
     if hours > 0: parts.append(f"{hours}h")
     if minutes > 0: parts.append(f"{minutes}m")
     
-    if not parts: return "< 1m"
+    # Exibe segundos apenas se for menos de 1 hora (para não poluir tempos longos)
+    if days == 0 and hours == 0:
+        parts.append(f"{secs}s")
+    
+    if not parts: return "< 1s"
     return " ".join(parts)
 
 @st.cache_data(ttl=3600)
@@ -150,7 +158,8 @@ def process_data(conversas, mapping, admin_map):
         stats = c.get('statistics') or {}
         
         # 1. Tempo para primeira resposta (segundos)
-        time_reply_sec = stats.get('time_to_admin_reply')
+        # Tenta pegar 'time_to_admin_reply' (padrão) ou 'response_time' (se existir customizado)
+        time_reply_sec = stats.get('time_to_admin_reply') or stats.get('response_time')
         
         # 2. Tempo total para resolução (segundos)
         time_close_sec = stats.get('time_to_close')
@@ -162,7 +171,7 @@ def process_data(conversas, mapping, admin_map):
             if last_close_at and created_at:
                 time_close_sec = last_close_at - created_at
         
-        # Criamos as strings formatadas já aqui para facilitar
+        # Strings formatadas (Agora com segundos se for curto)
         sla_resolucao_str = format_sla_string(time_close_sec)
         sla_resposta_str = format_sla_string(time_reply_sec)
         # -----------------------------
@@ -176,10 +185,10 @@ def process_data(conversas, mapping, admin_map):
             "Link": link,
             "CSAT Nota": csat_score,
             "CSAT Comentario": csat_comment,
-            "Tempo Resposta (seg)": time_reply_sec,   # Numérico para cálculo
-            "Tempo Resolução (seg)": time_close_sec,  # Numérico para cálculo
-            "Tempo Resposta": sla_resposta_str,       # Texto para exibir (ex: 2h 30m)
-            "Tempo Resolução": sla_resolucao_str      # Texto para exibir (ex: 1d 4h)
+            "Tempo Resposta (seg)": time_reply_sec,   # Numérico
+            "Tempo Resolução (seg)": time_close_sec,  # Numérico
+            "Tempo Resposta": sla_resposta_str,       # Texto (ex: 5m 30s)
+            "Tempo Resolução": sla_resolucao_str      # Texto (ex: 1d 4h)
         }
         
         attrs = c.get('custom_attributes', {})
@@ -318,11 +327,9 @@ if 'df_final' in st.session_state:
     
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     
-    # KPIs Atuais
     total_conv = len(df)
     preenchidos = df["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df.columns else 0
     
-    # KPIs Anteriores (Para Delta)
     total_conv_prev = len(df_prev)
     preenchidos_prev = df_prev["Motivo de Contato"].notna().sum() if "Motivo de Contato" in df_prev.columns else 0
     
@@ -338,15 +345,13 @@ if 'df_final' in st.session_state:
     
     delta_resolvidos = resolvidos - resolvidos_prev
     
-    # KPI 4: Tempo Médio de Resolução (FORMATO TEXTO)
+    # KPI 4: Tempo Médio de Resolução
     col_tempo_seg = "Tempo Resolução (seg)"
-    
     tempo_medio_seg = df[col_tempo_seg].mean() if col_tempo_seg in df.columns else 0
     tempo_medio_prev_seg = df_prev[col_tempo_seg].mean() if not df_prev.empty and col_tempo_seg in df_prev.columns else 0
     
     delta_tempo_seg = tempo_medio_seg - tempo_medio_prev_seg
     
-    # Formata Strings
     tempo_str = format_sla_string(tempo_medio_seg)
     delta_str = format_sla_string(abs(delta_tempo_seg))
     
@@ -358,11 +363,10 @@ if 'df_final' in st.session_state:
     kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
     kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
     
-    # KPI Customizado com texto
     kpi4.metric(
         "Tempo Médio Resolução", 
         tempo_str, 
-        delta=delta_tempo_seg, # O Streamlit precisa do numérico para saber se é verde/vermelho
+        delta=delta_tempo_seg,
         delta_color="inverse"
     )
 
@@ -462,14 +466,12 @@ if 'df_final' in st.session_state:
                     fig_csat_avg.update_layout(coloraxis_showscale=False)
                     st.plotly_chart(fig_csat_avg, use_container_width=True)
 
-    # --- ABA: TEMPO & SLA (FORMATADO) ---
     with tab_tempo:
         st.header("⏱️ Análise de Tempo e SLA")
         
         col_res_seg = "Tempo Resolução (seg)"
         col_rep_seg = "Tempo Resposta (seg)"
         
-        # Filtra dados com tempo de resolução
         df_tempo = df.dropna(subset=[col_res_seg])
         
         if df_tempo.empty:
@@ -487,21 +489,17 @@ if 'df_final' in st.session_state:
             
             # Gráfico 1: Velocidade por Agente
             st.subheader("⚡ Velocidade por Agente")
-            # Agrupa usando a média de segundos (para ordenar certo)
             tempo_agente = df_tempo.groupby("Atendente")[col_res_seg].mean().reset_index().sort_values(col_res_seg)
-            
-            # Cria coluna de texto formatado
             tempo_agente["Label"] = tempo_agente[col_res_seg].apply(format_sla_string)
             
             fig_time_agente = px.bar(
                 tempo_agente, 
-                x=col_res_seg, # Eixo X numérico (segundos) para a barra ficar proporcional
+                x=col_res_seg, 
                 y="Atendente", 
-                text="Label",  # Texto amigável na ponta da barra
+                text="Label",  
                 orientation='h', 
                 title=f"Média de Tempo para Resolver (Menor é melhor)"
             )
-            # Removemos os números do eixo X para não confundir, já que estamos mostrando o texto
             fig_time_agente.update_xaxes(showticklabels=False)
             st.plotly_chart(fig_time_agente, use_container_width=True)
             
@@ -510,7 +508,6 @@ if 'df_final' in st.session_state:
                 st.divider()
                 st.subheader("🐢 Motivos mais demorados")
                 tempo_motivo = df_tempo.groupby("Motivo de Contato")[col_res_seg].mean().reset_index().sort_values(col_res_seg, ascending=False)
-                
                 tempo_motivo["Label"] = tempo_motivo[col_res_seg].apply(format_sla_string)
                 
                 h_motivo = max(400, 100 + (len(tempo_motivo) * 30))
@@ -550,10 +547,17 @@ if 'df_final' in st.session_state:
         st.divider()
         st.caption("🔎 Filtros Avançados")
         
-        # Filtros Cascata
+        # --- FILTRO NOVO: POR ATENDENTE (Múltipla escolha) ---
+        agentes_unicos = sorted(df_view["Atendente"].astype(str).unique().tolist())
+        sel_agentes = st.multiselect("Filtrar por Atendente:", agentes_unicos, key="filtro_agente_tab")
+        
+        if sel_agentes:
+            df_view = df_view[df_view["Atendente"].isin(sel_agentes)]
+
+        # --- Filtros Cascata (Atributos) ---
         col_f1, col_v1 = st.columns(2)
         with col_f1:
-            coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=0, key="filtro_coluna_1")
+            coluna_1 = st.selectbox("1º Filtro (Atributo Principal):", ["(Todos)"] + cols_usuario, index=0, key="filtro_coluna_1")
         with col_v1:
             if coluna_1 != "(Todos)":
                 opcoes_1 = sorted(df_view[coluna_1].astype(str).unique().tolist())
@@ -565,7 +569,7 @@ if 'df_final' in st.session_state:
             col_f2, col_v2 = st.columns(2)
             with col_f2:
                 cols_restantes = [c for c in cols_usuario if c != coluna_1]
-                coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=0, key="filtro_coluna_2")
+                coluna_2 = st.selectbox("2º Filtro (Atributo Refinamento):", ["(Nenhum)"] + cols_restantes, index=0, key="filtro_coluna_2")
             with col_v2:
                 if coluna_2 != "(Nenhum)":
                     opcoes_2 = sorted(df_view[coluna_2].astype(str).unique().tolist())
@@ -575,7 +579,8 @@ if 'df_final' in st.session_state:
         st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
-        fixas = ["Data", "Atendente", "Tempo Resolução", "CSAT Nota", "Link"]
+        # Adicionei "Tempo Resposta" na lista fixa
+        fixas = ["Data", "Atendente", "Tempo Resposta", "Tempo Resolução", "CSAT Nota", "Link"]
         fixas_existentes = [c for c in fixas if c in df_view.columns]
         extras = [c for c in cols_usuario if c not in fixas_existentes]
         cols_display = fixas_existentes + extras
@@ -586,6 +591,7 @@ if 'df_final' in st.session_state:
             column_config={
                 "Link": st.column_config.LinkColumn("Link", display_text="🔗 Abrir"),
                 "CSAT Nota": st.column_config.NumberColumn("CSAT", format="%d ⭐"),
-                "Tempo Resolução": st.column_config.TextColumn("Tempo Resolução")
+                "Tempo Resolução": st.column_config.TextColumn("Tempo Resolução"),
+                "Tempo Resposta": st.column_config.TextColumn("Tempo 1ª Resp")
             }
         )
