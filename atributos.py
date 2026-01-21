@@ -460,6 +460,10 @@ if 'df_final' in st.session_state:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
     with tab_tabela:
+        if "CSAT Nota" not in df.columns:
+            st.warning("⚠️ As colunas de CSAT não aparecem porque os dados na memória são antigos.")
+            st.info("👉 Clique em 'Limpar Cache' e depois em 'Gerar Dados' para atualizar.")
+            st.stop() # Para a execução aqui até você atualizar
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
