@@ -66,7 +66,7 @@ def format_sla_string(seconds):
     if hours > 0: parts.append(f"{hours}h")
     if minutes > 0: parts.append(f"{minutes}m")
     
-    # Exibe segundos apenas se for menos de 1 hora (para não poluir tempos longos)
+    # Exibe segundos apenas se for menos de 1 hora
     if days == 0 and hours == 0:
         parts.append(f"{secs}s")
     
@@ -154,27 +154,25 @@ def process_data(conversas, mapping, admin_map):
         csat_score = rating_data.get('rating') 
         csat_comment = rating_data.get('remark')
         
-        # --- NOVO: CÁLCULO DE TEMPOS (SLA) ---
+        # --- CÁLCULO DE TEMPOS (SLA) ---
         stats = c.get('statistics') or {}
         
         # 1. Tempo para primeira resposta (segundos)
-        # Tenta pegar 'time_to_admin_reply' (padrão) ou 'response_time' (se existir customizado)
         time_reply_sec = stats.get('time_to_admin_reply') or stats.get('response_time')
         
         # 2. Tempo total para resolução (segundos)
         time_close_sec = stats.get('time_to_close')
         
-        # Fallback: Se não vier pronto, calcula (Fechamento - Criação)
+        # Fallback
         if not time_close_sec:
             last_close_at = stats.get('last_close_at')
             created_at = c.get('created_at')
             if last_close_at and created_at:
                 time_close_sec = last_close_at - created_at
         
-        # Strings formatadas (Agora com segundos se for curto)
+        # Strings formatadas
         sla_resolucao_str = format_sla_string(time_close_sec)
         sla_resposta_str = format_sla_string(time_reply_sec)
-        # -----------------------------
 
         row = {
             "ID": c['id'],
@@ -187,8 +185,8 @@ def process_data(conversas, mapping, admin_map):
             "CSAT Comentario": csat_comment,
             "Tempo Resposta (seg)": time_reply_sec,   # Numérico
             "Tempo Resolução (seg)": time_close_sec,  # Numérico
-            "Tempo Resposta": sla_resposta_str,       # Texto (ex: 5m 30s)
-            "Tempo Resolução": sla_resolucao_str      # Texto (ex: 1d 4h)
+            "Tempo Resposta": sla_resposta_str,       # Texto
+            "Tempo Resolução": sla_resolucao_str      # Texto
         }
         
         attrs = c.get('custom_attributes', {})
@@ -229,7 +227,6 @@ def gerar_excel_multias(df, colunas_selecionadas):
                     pass
 
         # 2. Aba Base Completa
-        # Atualizado para colunas Formatadas
         cols_fixas = ["Data", "Atendente", "Tempo Resposta", "Tempo Resolução", "CSAT Nota", "CSAT Comentario", "Link", "Qtd. Atributos"]
         cols_extras = [c for c in colunas_selecionadas if c not in cols_fixas]
         cols_finais = cols_fixas + cols_extras
@@ -345,7 +342,7 @@ if 'df_final' in st.session_state:
     
     delta_resolvidos = resolvidos - resolvidos_prev
     
-    # KPI 4: Tempo Médio de Resolução
+    # KPI 4: Tempo Médio
     col_tempo_seg = "Tempo Resolução (seg)"
     tempo_medio_seg = df[col_tempo_seg].mean() if col_tempo_seg in df.columns else 0
     tempo_medio_prev_seg = df_prev[col_tempo_seg].mean() if not df_prev.empty and col_tempo_seg in df_prev.columns else 0
@@ -367,7 +364,8 @@ if 'df_final' in st.session_state:
         "Tempo Médio Resolução", 
         tempo_str, 
         delta=delta_tempo_seg,
-        delta_color="inverse"
+        delta_color="inverse",
+        help=f"Variação: {delta_str}"
     )
 
     st.divider()
@@ -460,11 +458,32 @@ if 'df_final' in st.session_state:
                 k1, k2 = st.columns(2)
                 k1.metric("Média Geral CSAT", f"{df_csat['CSAT Nota'].mean():.2f}/5.0")
                 k2.metric("Total de Avaliações", len(df_csat))
+                
+                # --- GRÁFICO 1: MÉDIA ---
                 if "Motivo de Contato" in df.columns:
                     csat_por_motivo = df_csat.groupby("Motivo de Contato")["CSAT Nota"].mean().reset_index().sort_values("CSAT Nota")
                     fig_csat_avg = px.bar(csat_por_motivo, x="CSAT Nota", y="Motivo de Contato", orientation='h', text_auto='.2f', color="CSAT Nota", color_continuous_scale="RdYlGn", range_color=[1, 5])
                     fig_csat_avg.update_layout(coloraxis_showscale=False)
                     st.plotly_chart(fig_csat_avg, use_container_width=True)
+                    
+                    st.divider()
+                    
+                    # --- GRÁFICO 2 (RESTAURADO): VOLUME DE AVALIAÇÕES ---
+                    st.subheader("Volume de Avaliações por Nota e Motivo")
+                    
+                    df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
+                    
+                    fig_csat_vol = px.histogram(
+                        df_csat, 
+                        y="Motivo de Contato", 
+                        color="Nota Label", 
+                        barmode="stack",
+                        text_auto=True,
+                        category_orders={"Nota Label": ["1", "2", "3", "4", "5"]},
+                        color_discrete_map={"1": "#FF4B4B", "2": "#FF8C00", "3": "#FFD700", "4": "#9ACD32", "5": "#008000"}
+                    )
+                    fig_csat_vol.update_layout(yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig_csat_vol, use_container_width=True)
 
     with tab_tempo:
         st.header("⏱️ Análise de Tempo e SLA")
@@ -547,14 +566,13 @@ if 'df_final' in st.session_state:
         st.divider()
         st.caption("🔎 Filtros Avançados")
         
-        # --- FILTRO NOVO: POR ATENDENTE (Múltipla escolha) ---
+        # Filtro Atendente
         agentes_unicos = sorted(df_view["Atendente"].astype(str).unique().tolist())
         sel_agentes = st.multiselect("Filtrar por Atendente:", agentes_unicos, key="filtro_agente_tab")
-        
         if sel_agentes:
             df_view = df_view[df_view["Atendente"].isin(sel_agentes)]
 
-        # --- Filtros Cascata (Atributos) ---
+        # Filtros Cascata
         col_f1, col_v1 = st.columns(2)
         with col_f1:
             coluna_1 = st.selectbox("1º Filtro (Atributo Principal):", ["(Todos)"] + cols_usuario, index=0, key="filtro_coluna_1")
@@ -579,7 +597,6 @@ if 'df_final' in st.session_state:
         st.divider()
         st.write(f"**Resultados encontrados:** {len(df_view)}")
         
-        # Adicionei "Tempo Resposta" na lista fixa
         fixas = ["Data", "Atendente", "Tempo Resposta", "Tempo Resolução", "CSAT Nota", "Link"]
         fixas_existentes = [c for c in fixas if c in df_view.columns]
         extras = [c for c in cols_usuario if c not in fixas_existentes]
