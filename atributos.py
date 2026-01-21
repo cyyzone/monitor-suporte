@@ -124,15 +124,28 @@ def process_data(conversas, mapping, admin_map):
         csat_score = rating_data.get('rating') 
         csat_comment = rating_data.get('remark')
         
-        # --- NOVO: CAPTURA DE TEMPOS (SLA) ---
+        # --- NOVO: CÁLCULO DE TEMPOS (SLA) COM FALLBACK ---
         stats = c.get('statistics') or {}
         
-        # Tempo para primeira resposta (em segundos) -> Converter para minutos
+        # 1. Tempo para primeira resposta (SLA de Resposta)
         time_reply_sec = stats.get('time_to_admin_reply')
         time_reply_min = round(time_reply_sec / 60, 1) if time_reply_sec else None
         
-        # Tempo total para resolução (em segundos) -> Converter para minutos
+        # 2. Tempo total para resolução (SLA de Resolução)
         time_close_sec = stats.get('time_to_close')
+        
+        # --- O SEGREDO ESTÁ AQUI (FALLBACK) ---
+        # Se o Intercom mandou vazio (None), mas a conversa tem data de fechamento (last_close_at),
+        # nós calculamos manualmente a diferença.
+        if not time_close_sec:
+            last_close_at = stats.get('last_close_at') # Timestamp do fechamento
+            created_at = c.get('created_at')
+            
+            if last_close_at and created_at:
+                # Calcula a diferença bruta
+                time_close_sec = last_close_at - created_at
+        
+        # Converte para minutos se tivermos algum valor (seja oficial ou calculado)
         time_close_min = round(time_close_sec / 60, 1) if time_close_sec else None
         # -----------------------------
 
