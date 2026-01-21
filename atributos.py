@@ -330,6 +330,7 @@ if 'df_final' in st.session_state:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
     with tab_tabela:
+        # --- Topo: Checkboxes e Botão de Exportar ---
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
@@ -339,12 +340,38 @@ if 'df_final' in st.session_state:
             excel_data = gerar_excel_multias(df, cols_usuario)
             st.download_button("📥 Baixar Excel", data=excel_data, file_name="relatorio_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
+        # --- Base Inicial de Dados ---
         df_view = df.copy()
         
-        # Filtros
+        # Aplica filtros de checkbox
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
+        # --- NOVO: Filtro Dinâmico por Coluna ---
+        st.divider()
+        st.caption("🔎 Filtrar Conteúdo Específico")
+        
+        col_filtro, col_valores = st.columns(2)
+        
+        with col_filtro:
+            # Lista apenas as colunas que o usuário selecionou no sidebar
+            coluna_escolhida = st.selectbox("Filtrar pela coluna:", ["(Mostrar Tudo)"] + cols_usuario)
+        
+        with col_valores:
+            if coluna_escolhida != "(Mostrar Tudo)":
+                # Pega valores únicos da coluna escolhida para preencher o multiselect
+                opcoes = df_view[coluna_escolhida].dropna().unique()
+                valores_filtrados = st.multiselect(f"Valores em '{coluna_escolhida}':", options=opcoes)
+                
+                # Se o usuário selecionou algo, aplica o filtro no dataframe
+                if valores_filtrados:
+                    df_view = df_view[df_view[coluna_escolhida].isin(valores_filtrados)]
+            else:
+                st.info("Selecione uma coluna ao lado para habilitar o filtro.")
+
+        # --- Exibição da Tabela ---
+        st.write(f"**Resultados encontrados:** {len(df_view)}")
+        
         cols_display = ["Data", "Atendente", "Link"] + cols_usuario
         cols_display = [c for c in cols_display if c in df_view.columns]
 
@@ -353,6 +380,5 @@ if 'df_final' in st.session_state:
             use_container_width=True,
             column_config={
                 "Link": st.column_config.LinkColumn("Link", display_text="Abrir")
-                # Removemos a barra de progresso "Info" daqui
             }
         )
