@@ -342,30 +342,37 @@ if 'df_final' in st.session_state:
     
     delta_resolvidos = resolvidos - resolvidos_prev
     
-    # KPI 4: Tempo Médio
+    # KPI 4: Tempo Médio de Resolução (FORMATO TEXTO + DELTA LEGÍVEL)
     col_tempo_seg = "Tempo Resolução (seg)"
+    
     tempo_medio_seg = df[col_tempo_seg].mean() if col_tempo_seg in df.columns else 0
     tempo_medio_prev_seg = df_prev[col_tempo_seg].mean() if not df_prev.empty and col_tempo_seg in df_prev.columns else 0
     
     delta_tempo_seg = tempo_medio_seg - tempo_medio_prev_seg
     
+    # Formata o valor principal
     tempo_str = format_sla_string(tempo_medio_seg)
-    delta_str = format_sla_string(abs(delta_tempo_seg))
     
-    if delta_tempo_seg > 0: delta_str = f"🔺 {delta_str} (piorou)"
-    elif delta_tempo_seg < 0: delta_str = f"🔻 {delta_str} (melhorou)"
-    else: delta_str = None
+    # Formata o Delta (diferença) para ficar legível (ex: 2h 30m)
+    delta_str_human = format_sla_string(abs(delta_tempo_seg))
+    
+    # Monta a string final do Delta com sinal (+ ou -)
+    if delta_tempo_seg > 0: 
+        delta_label = f"{delta_str_human} (piorou)" # Se aumentou o tempo
+        cor_delta = "inverse" # Vermelho
+    elif delta_tempo_seg < 0: 
+        delta_label = f"-{delta_str_human} (melhorou)" # Se diminuiu o tempo (sinal negativo explícito)
+        cor_delta = "inverse" # Verde (devido ao inverse e valor negativo lógico)
+    else: 
+        delta_label = "0s"
+        cor_delta = "off"
 
-    kpi1.metric("Total Conversas", total_conv, delta=delta_total)
-    kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
-    kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
-    
     kpi4.metric(
         "Tempo Médio Resolução", 
         tempo_str, 
-        delta=delta_tempo_seg,
-        delta_color="inverse",
-        help=f"Variação: {delta_str}"
+        delta=delta_tempo_seg, # Passamos o número para o Streamlit definir a cor (Verde/Vermelho)
+        delta_color="inverse", # Inverse garante que negativo (menos tempo) seja Verde
+        help=f"Variação de {delta_label} em relação ao período anterior"
     )
 
     st.divider()
