@@ -197,7 +197,9 @@ if 'df_final' in st.session_state:
     
     # --- SELEÇÃO DE COLUNAS ---
     todas_colunas = list(df.columns)
-    sugestao = ["Tipo de Atendimento", "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
+    
+    # [ATUALIZADO] Adicionei "Expansão" na lista de sugestão padrão
+    sugestao = ["Tipo de Atendimento", "Expansão", "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
     cols_usuario = st.multiselect(
@@ -206,7 +208,7 @@ if 'df_final' in st.session_state:
         default=padrao_existente
     )
 
-    # --- CÁLCULO DE COMPLEXIDADE AJUSTADO ---
+    # --- CÁLCULO DE COMPLEXIDADE ---
     if cols_usuario:
         # Colunas que NÃO devem contar pontos de complexidade
         ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID"]
@@ -313,7 +315,6 @@ if 'df_final' in st.session_state:
         col_m2 = "Motivo 2 (Se houver)"
         
         if col_m1 in df.columns and col_m2 in df.columns:
-            # Mantém apenas o Ranking, sem o mapa de calor
             lista_geral = pd.concat([df[col_m1], df[col_m2]])
             ranking_global = lista_geral.value_counts().reset_index()
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
@@ -359,11 +360,11 @@ if 'df_final' in st.session_state:
         
         with col_valores:
             if coluna_escolhida != "(Mostrar Tudo)":
-                # Pega valores únicos da coluna escolhida para preencher o multiselect
+                # Pega valores únicos da coluna escolhida
                 opcoes = df_view[coluna_escolhida].dropna().unique()
                 valores_filtrados = st.multiselect(f"Valores em '{coluna_escolhida}':", options=opcoes)
                 
-                # Se o usuário selecionou algo, aplica o filtro no dataframe
+                # Se o usuário selecionou algo, aplica o filtro
                 if valores_filtrados:
                     df_view = df_view[df_view[coluna_escolhida].isin(valores_filtrados)]
             else:
