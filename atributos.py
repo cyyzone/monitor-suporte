@@ -338,12 +338,6 @@ if 'df_final' in st.session_state:
                 # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
                 st.subheader("Volume de Avaliações por Nota e Motivo")
                 
-                # Para garantir que o gráfico mostre notas inteiras como categoria e não número contínuo
-                df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
-                
-                # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
-                st.subheader("Volume de Avaliações por Nota e Motivo")
-                
                 df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
                 
                 # --- CÁLCULO DE PORCENTAGEM PARA O CSAT ---
