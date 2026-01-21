@@ -198,11 +198,8 @@ if 'df_final' in st.session_state:
     # --- SELEÇÃO DE COLUNAS ---
     todas_colunas = list(df.columns)
     
-    # Define o nome exato da nova coluna
-    COL_EXPANSAO = "Expansão (Passagem de bastão para CSM)"
-    
-    # Adicionei o nome exato na sugestão
-    sugestao = ["Tipo de Atendimento", COL_EXPANSAO, "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
+    # Expansão adicionada na sugestão
+    sugestao = ["Tipo de Atendimento", "Expansão", "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
     cols_usuario = st.multiselect(
@@ -213,13 +210,9 @@ if 'df_final' in st.session_state:
 
     # --- CÁLCULO DE COMPLEXIDADE ---
     if cols_usuario:
-        # Colunas que NÃO devem contar pontos de complexidade
         ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID"]
-        
-        # Cria uma lista apenas com as colunas que REALMENTE importam para a contagem
         cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
         
-        # Calcula a soma apenas nessas colunas
         if cols_para_contar:
             df["Qtd. Atributos"] = df[cols_para_contar].notna().sum(axis=1)
         else:
@@ -259,6 +252,7 @@ if 'df_final' in st.session_state:
         c1, c2 = st.columns([2, 1])
         with c1:
             if cols_usuario:
+                # Aqui o usuário pode selecionar manualmente "Expansão" no dropdown
                 graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_pie")
                 df_pie = df[df[graf_sel].notna()]
                 fig_pie = px.pie(df_pie, names=graf_sel, hole=0.4, title=f"Distribuição: {graf_sel}")
@@ -282,6 +276,7 @@ if 'df_final' in st.session_state:
         c2.dataframe(vol_por_agente, hide_index=True, use_container_width=True)
         st.divider()
         st.subheader("🕵️ Detalhe por Agente")
+        # Aqui "Expansão" vai aparecer na lista se estiver em cols_usuario
         cruzamento_agente = st.selectbox("Cruzar Atendente com:", ["Status do atendimento"] + cols_usuario)
         if cruzamento_agente in df.columns:
             df_agente_cross = df.dropna(subset=[cruzamento_agente])
@@ -293,7 +288,7 @@ if 'df_final' in st.session_state:
         has_motivo = "Motivo de Contato" in df.columns
         has_status = "Status do atendimento" in df.columns
         has_tipo = "Tipo de Atendimento" in df.columns
-        has_expansao = COL_EXPANSAO in df.columns  # Verifica o nome exato
+        has_expansao = "Expansão" in df.columns  # Verifica se existe Expansão
         
         # 1. Status x Motivo
         if has_motivo and has_status:
@@ -315,11 +310,11 @@ if 'df_final' in st.session_state:
             st.plotly_chart(fig_cross2, use_container_width=True)
             st.divider()
 
-        # 3. NOVO: Expansão (Nome Exato) x Motivo
+        # 3. NOVO: Expansão x Motivo (Se existir a coluna)
         if has_motivo and has_expansao:
-            st.subheader(f"{COL_EXPANSAO} x Motivo")
-            df_cross3 = df.dropna(subset=["Motivo de Contato", COL_EXPANSAO])
-            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color=COL_EXPANSAO, 
+            st.subheader("Expansão x Motivo")
+            df_cross3 = df.dropna(subset=["Motivo de Contato", "Expansão"])
+            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color="Expansão", 
                                      barmode="stack", text_auto=True, height=600)
             fig_cross3.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross3, use_container_width=True)
@@ -363,13 +358,14 @@ if 'df_final' in st.session_state:
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
-        # --- Filtro Dinâmico por Coluna ---
+        # --- NOVO: Filtro Dinâmico por Coluna ---
         st.divider()
         st.caption("🔎 Filtrar Conteúdo Específico")
         
         col_filtro, col_valores = st.columns(2)
         
         with col_filtro:
+            # Lista apenas as colunas que o usuário selecionou no sidebar
             coluna_escolhida = st.selectbox("Filtrar pela coluna:", ["(Mostrar Tudo)"] + cols_usuario)
         
         with col_valores:
