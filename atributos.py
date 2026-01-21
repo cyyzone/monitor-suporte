@@ -330,9 +330,9 @@ if 'df_final' in st.session_state:
                     range_color=[1, 5]               # Trava a escala: 1 é sempre vermelho, 5 é sempre verde
                 )
                     
-                 fig_csat_avg.update_layout(coloraxis_showscale=False) 
+                fig_csat_avg.update_layout(coloraxis_showscale=False) 
                     
-                 st.plotly_chart(fig_csat_avg, use_container_width=True)
+                st.plotly_chart(fig_csat_avg, use_container_width=True)
                 st.divider()
                 
                 # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
