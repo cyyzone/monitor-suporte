@@ -373,25 +373,28 @@ if 'df_final' in st.session_state:
                 contagem = df_clean[graf_sel].value_counts().reset_index()
                 contagem.columns = ["Opção", "Quantidade"]
                 
-                # --- CÓDIGO NOVO COMEÇA AQUI ---
-                
-                # 1. Calculamos o total de registros visíveis
+                # --- CÁLCULO DE PORCENTAGEM ---
                 total_registros = contagem["Quantidade"].sum()
-                
-                # 2. Criamos uma coluna nova com o texto formatado: "145 (73.2%)"
                 contagem["Texto_Label"] = contagem["Quantidade"].apply(
                     lambda x: f"{x} ({(x / total_registros * 100):.1f}%)"
                 )
                 
+                # --- ALTURA DINÂMICA (O SEGREDO) ---
+                # Base de 400px + 30px para cada barra extra
+                qtd_barras = len(contagem)
+                altura_dinamica = max(400, 150 + (qtd_barras * 35))
+                
                 fig_bar = px.bar(
                     contagem, 
-                    x="Opção", 
-                    y="Quantidade", 
-                    text="Texto_Label", # Trocamos 'text_auto=True' pela nossa coluna personalizada
-                    title=f"Distribuição: {graf_sel}"
+                    x="Quantidade", # Inverti para horizontal para facilitar leitura de textos longos
+                    y="Opção",      # Inverti para horizontal
+                    text="Texto_Label", 
+                    title=f"Distribuição: {graf_sel}",
+                    orientation='h', # Barras deitadas são melhores para muitas categorias
+                    height=altura_dinamica # Aplica a altura calculada
                 )
                 
-                fig_bar.update_layout(xaxis={'categoryorder':'total descending'})
+                fig_bar.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.warning("Selecione atributos no topo.")
@@ -459,16 +462,30 @@ if 'df_final' in st.session_state:
         has_tipo = "Tipo de Atendimento" in df.columns
         has_expansao = COL_EXPANSAO in df.columns
         
-        # Função auxiliar para gerar gráfico empilhado com %
+        # Função auxiliar com ALTURA DINÂMICA
         def plot_empilhado_pct(df_input, col_y, col_color, title):
             # 1. Conta
             grouped = df_input.groupby([col_y, col_color]).size().reset_index(name='Qtd')
-            # 2. Calcula total da barra (para a %)
+            # 2. Calcula total
             grouped['Total_Grupo'] = grouped.groupby(col_y)['Qtd'].transform('sum')
             # 3. Formata texto
             grouped['Label'] = grouped.apply(lambda x: f"{x['Qtd']} ({(x['Qtd']/x['Total_Grupo']*100):.0f}%)", axis=1)
-            # 4. Plota
-            fig = px.bar(grouped, y=col_y, x='Qtd', color=col_color, text='Label', orientation='h', title=title, height=600)
+            
+            # 4. CALCULA ALTURA
+            qtd_categorias_y = grouped[col_y].nunique()
+            altura = max(500, 100 + (qtd_categorias_y * 30)) # 30px por linha
+            
+            # 5. Plota
+            fig = px.bar(
+                grouped, 
+                y=col_y, 
+                x='Qtd', 
+                color=col_color, 
+                text='Label', 
+                orientation='h', 
+                title=title, 
+                height=altura # Altura variável
+            )
             fig.update_layout(yaxis={'categoryorder':'total ascending'})
             return fig
 
@@ -503,7 +520,7 @@ if 'df_final' in st.session_state:
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
             ranking_global = ranking_global.sort_values(by="Incidência Total", ascending=True)
             
-            # CÁLCULO DA PORCENTAGEM
+            # Porcentagem
             total_motivos = ranking_global["Incidência Total"].sum()
             ranking_global["Label"] = ranking_global["Incidência Total"].apply(
                 lambda x: f"{x} ({(x/total_motivos*100):.1f}%)"
@@ -511,14 +528,16 @@ if 'df_final' in st.session_state:
             
             c_rank1, c_rank2 = st.columns([2, 1])
             with c_rank1:
-                altura_dinamica = max(400, len(ranking_global) * 30)
+                # --- ALTURA DINÂMICA ---
+                qtd_linhas = len(ranking_global)
+                altura_dinamica = max(500, 100 + (qtd_linhas * 30))
                 
                 fig_global = px.bar(
                     ranking_global, 
                     x="Incidência Total", 
                     y="Motivo Unificado", 
                     orientation='h', 
-                    text="Label", # Usamos nossa etiqueta nova
+                    text="Label", 
                     title="Todos os Motivos (Somando Motivo 1 + 2)",
                     height=altura_dinamica
                 )
