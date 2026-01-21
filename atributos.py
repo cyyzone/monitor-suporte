@@ -119,13 +119,21 @@ def process_data(conversas, mapping, admin_map):
         else:
             assignee_name = "Não atribuído"
 
+        # --- NOVO: CAPTURA DO CSAT ---
+        rating_data = c.get('conversation_rating', {})
+        csat_score = rating_data.get('rating') # Retorna None se não avaliou
+        csat_comment = rating_data.get('remark')
+        # -----------------------------
+
         row = {
             "ID": c['id'],
             "timestamp_real": c['created_at'], 
             "Data": datetime.fromtimestamp(c['created_at']).strftime("%d/%m/%Y %H:%M"),
             "Data_Dia": datetime.fromtimestamp(c['created_at']).strftime("%Y-%m-%d"),
             "Atendente": assignee_name,
-            "Link": link
+            "Link": link,
+            "CSAT Nota": csat_score,       # Nova coluna
+            "CSAT Comentario": csat_comment # Nova coluna
         }
         
         attrs = c.get('custom_attributes', {})
@@ -139,7 +147,6 @@ def process_data(conversas, mapping, admin_map):
     
     df = pd.DataFrame(rows)
     
-    # Força coluna Motivo 2 se não existir
     coluna_teimosa = "Motivo 2 (Se houver)"
     if not df.empty and coluna_teimosa not in df.columns:
         df[coluna_teimosa] = None 
@@ -280,8 +287,70 @@ if 'df_final' in st.session_state:
     st.divider()
 
     # --- ABAS DE ANÁLISE ---
-    tab_grafico, tab_equipe, tab_cruzamento, tab_motivos, tab_tabela = st.tabs(["📊 Distribuição", "👥 Equipe", "🔀 Cruzamentos", "🔗 Motivo x Motivo", "📋 Detalhes & Export"])
-    
+    tab_grafico, tab_equipe, tab_cruzamento, tab_motivos, tab_csat, tab_tabela = st.tabs(["📊 Distribuição", "👥 Equipe", "🔀 Cruzamentos", "🔗 Motivo x Motivo", "⭐ CSAT", "📋 Detalhes & Export"])
+
+    with tab_csat:
+        st.header("Análise de Satisfação (CSAT)")
+        
+        # Filtra apenas quem tem nota
+        df_csat = df.dropna(subset=["CSAT Nota"])
+        
+        if df_csat.empty:
+            st.info("Nenhuma avaliação de CSAT encontrada neste período.")
+        else:
+            # Métricas Gerais
+            media_geral = df_csat["CSAT Nota"].mean()
+            qtd_avaliacoes = len(df_csat)
+            
+            k1, k2 = st.columns(2)
+            k1.metric("Média Geral CSAT", f"{media_geral:.2f}/5.0")
+            k2.metric("Total de Avaliações", qtd_avaliacoes)
+            
+            st.divider()
+            
+            # Gráfico 1: Média de CSAT por Motivo
+            if "Motivo de Contato" in df.columns:
+                st.subheader("Média de CSAT por Motivo")
+                
+                # Agrupa por motivo e calcula média
+                csat_por_motivo = df_csat.groupby("Motivo de Contato")["CSAT Nota"].mean().reset_index()
+                csat_por_motivo = csat_por_motivo.sort_values(by="CSAT Nota", ascending=True) # Piores primeiro
+                
+                fig_csat_avg = px.bar(
+                    csat_por_motivo, 
+                    x="CSAT Nota", 
+                    y="Motivo de Contato", 
+                    orientation='h',
+                    text_auto='.2f',
+                    title="Média de Nota por Motivo (Do pior para o melhor)",
+                    color="CSAT Nota",
+                    color_continuous_scale="RdYlGn" # Vermelho para Amarelo para Verde
+                )
+                st.plotly_chart(fig_csat_avg, use_container_width=True)
+                
+                st.divider()
+                
+                # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
+                st.subheader("Volume de Avaliações por Nota e Motivo")
+                
+                # Para garantir que o gráfico mostre notas inteiras como categoria e não número contínuo
+                df_csat["Nota Label"] = df_csat["CSAT Nota"].astype(int).astype(str)
+                
+                fig_csat_vol = px.histogram(
+                    df_csat, 
+                    y="Motivo de Contato", 
+                    color="Nota Label", 
+                    barmode="stack",
+                    text_auto=True,
+                    category_orders={"Nota Label": ["1", "2", "3", "4", "5"]},
+                    color_discrete_map={"1": "#FF4B4B", "2": "#FF8C00", "3": "#FFD700", "4": "#9ACD32", "5": "#008000"}
+                )
+                fig_csat_vol.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_csat_vol, use_container_width=True)
+
+            else:
+                st.warning("Coluna 'Motivo de Contato' não encontrada para cruzar.")
+                
     with tab_grafico:
         c1, c2 = st.columns([2, 1])
         with c1:
