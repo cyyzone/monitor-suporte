@@ -332,7 +332,7 @@ with tab_motivos:
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
-    with tab_tabela:
+with tab_tabela:
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
