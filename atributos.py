@@ -123,7 +123,7 @@ def process_data(conversas, mapping, admin_map):
     
     df = pd.DataFrame(rows)
     
-    # Força coluna Motivo 2
+    # Força coluna Motivo 2 se não existir
     coluna_teimosa = "Motivo 2 (Se houver)"
     if not df.empty and coluna_teimosa not in df.columns:
         df[coluna_teimosa] = None 
@@ -206,9 +206,10 @@ if 'df_final' in st.session_state:
         default=padrao_existente
     )
 
+    # --- CÁLCULO DE COMPLEXIDADE AJUSTADO ---
     if cols_usuario:
-        # Colunas que NÃO devem contar pontos de complexidade (ajuste conforme seus nomes exatos)
-        ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data"]
+        # Colunas que NÃO devem contar pontos de complexidade
+        ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID"]
         
         # Cria uma lista apenas com as colunas que REALMENTE importam para a contagem
         cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
@@ -233,7 +234,6 @@ if 'df_final' in st.session_state:
     if "Motivo de Contato" in df.columns:
         top = df["Motivo de Contato"].value_counts().head(1)
         if not top.empty: 
-            # AQUI: Removi o [:20] para mostrar o texto inteiro
             top_motivo = f"{top.index[0]} ({top.values[0]})"
 
     resolvidos = 0
@@ -243,12 +243,9 @@ if 'df_final' in st.session_state:
     kpi1.metric("Total Conversas", total_conv)
     kpi2.metric("Classificados", f"{preenchidos}", f"{taxa_classif:.1f}%")
     kpi3.metric("Resolvidos", resolvidos)
-    # Mostra o nome do motivo. O .split(">")[-1] pega só a parte final depois da seta. 
-    # Se quiser mostrar TUDO (Categoria > Motivo), remova o .split... e deixe só top_motivo
     kpi4.metric("Principal Motivo", top_motivo.split(">")[-1].strip()) 
 
     st.divider()
-
 
     # --- ABAS DE ANÁLISE ---
     tab_grafico, tab_equipe, tab_cruzamento, tab_motivos, tab_tabela = st.tabs(["📊 Distribuição", "👥 Equipe", "🔀 Cruzamentos", "🔗 Motivo x Motivo", "📋 Detalhes & Export"])
@@ -310,13 +307,13 @@ if 'df_final' in st.session_state:
             fig_cross2.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross2, use_container_width=True)
 
-with tab_motivos:
+    with tab_motivos:
         st.markdown("### 🔗 Análise Unificada de Motivos")
         col_m1 = "Motivo de Contato"
         col_m2 = "Motivo 2 (Se houver)"
         
         if col_m1 in df.columns and col_m2 in df.columns:
-            # 1. RANKING GLOBAL (Mantém apenas isso)
+            # Mantém apenas o Ranking, sem o mapa de calor
             lista_geral = pd.concat([df[col_m1], df[col_m2]])
             ranking_global = lista_geral.value_counts().reset_index()
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
@@ -332,7 +329,7 @@ with tab_motivos:
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
-with tab_tabela:
+    with tab_tabela:
         c1, c2 = st.columns([3, 1])
         with c1:
             f1, f2 = st.columns(2)
@@ -348,7 +345,6 @@ with tab_tabela:
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
-        # REMOVIDO: "Qtd. Atributos" da lista abaixo
         cols_display = ["Data", "Atendente", "Link"] + cols_usuario
         cols_display = [c for c in cols_display if c in df_view.columns]
 
@@ -357,6 +353,6 @@ with tab_tabela:
             use_container_width=True,
             column_config={
                 "Link": st.column_config.LinkColumn("Link", display_text="Abrir")
-                # REMOVIDO: A configuração do ProgressColumn ("Info")
+                # Removemos a barra de progresso "Info" daqui
             }
         )
