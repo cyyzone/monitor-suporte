@@ -6,8 +6,17 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from io import BytesIO
 
+# --- IMPORTAÇÃO DO UTILS ---
+# Certifique-se que o arquivo utils.py está na mesma pasta
+from utils import check_password
+
 # --- CONFIGURAÇÕES ---
 st.set_page_config(page_title="Relatório de Atributos Intercom", page_icon="📊", layout="wide")
+
+# --- BLOQUEIO DE SENHA ---
+# Se a senha estiver errada ou não digitada, o app para aqui.
+if not check_password():
+    st.stop()
 
 WORKSPACE_ID = "xwvpdtlu"
 
