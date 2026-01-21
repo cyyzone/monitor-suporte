@@ -326,10 +326,13 @@ if 'df_final' in st.session_state:
                     text_auto='.2f',
                     title="Média de Nota por Motivo (Do pior para o melhor)",
                     color="CSAT Nota",
-                    color_continuous_scale="RdYlGn" # Vermelho para Amarelo para Verde
+                    color_continuous_scale="RdYlGn", # Escala Vermelho-Amarelo-Verde
+                    range_color=[1, 5]               # Trava a escala: 1 é sempre vermelho, 5 é sempre verde
                 )
-                st.plotly_chart(fig_csat_avg, use_container_width=True)
-                
+                    
+                 fig_csat_avg.update_layout(coloraxis_showscale=False) 
+                    
+                 st.plotly_chart(fig_csat_avg, use_container_width=True)
                 st.divider()
                 
                 # Gráfico 2: Volume de Avaliações por Motivo (Cruzamento)
