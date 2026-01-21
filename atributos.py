@@ -7,14 +7,16 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 # --- IMPORTAÇÃO DO UTILS ---
-# Certifique-se que o arquivo utils.py está na mesma pasta
-from utils import check_password
+try:
+    from utils import check_password
+except ImportError:
+    st.error("Arquivo utils.py não encontrado. Certifique-se de que ele está na mesma pasta.")
+    st.stop()
 
 # --- CONFIGURAÇÕES ---
 st.set_page_config(page_title="Relatório de Atributos Intercom", page_icon="📊", layout="wide")
 
 # --- BLOQUEIO DE SENHA ---
-# Se a senha estiver errada ou não digitada, o app para aqui.
 if not check_password():
     st.stop()
 
@@ -207,8 +209,11 @@ if 'df_final' in st.session_state:
     # --- SELEÇÃO DE COLUNAS ---
     todas_colunas = list(df.columns)
     
-    # Expansão adicionada na sugestão
-    sugestao = ["Tipo de Atendimento", "Expansão", "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
+    # Define o nome exato da nova coluna
+    COL_EXPANSAO = "Expansão (Passagem de bastão para CSM)"
+    
+    # Adicionei o nome exato na sugestão
+    sugestao = ["Tipo de Atendimento", COL_EXPANSAO, "Motivo de Contato", "Motivo 2 (Se houver)", "Status do atendimento"]
     padrao_existente = [c for c in sugestao if c in todas_colunas]
     
     cols_usuario = st.multiselect(
@@ -219,9 +224,13 @@ if 'df_final' in st.session_state:
 
     # --- CÁLCULO DE COMPLEXIDADE ---
     if cols_usuario:
+        # Colunas que NÃO devem contar pontos de complexidade
         ignorar_na_conta = ["Status do atendimento", "Tipo de Atendimento", "Atendente", "Data", "Data_Dia", "Link", "timestamp_real", "ID"]
+        
+        # Cria uma lista apenas com as colunas que REALMENTE importam para a contagem
         cols_para_contar = [c for c in cols_usuario if c not in ignorar_na_conta]
         
+        # Calcula a soma apenas nessas colunas
         if cols_para_contar:
             df["Qtd. Atributos"] = df[cols_para_contar].notna().sum(axis=1)
         else:
@@ -263,23 +272,19 @@ if 'df_final' in st.session_state:
             if cols_usuario:
                 graf_sel = st.selectbox("Atributo:", cols_usuario, key="sel_bar")
                 
-                # 1. Prepara os dados (Conta quantos tem de cada tipo)
                 df_clean = df[df[graf_sel].notna()]
                 contagem = df_clean[graf_sel].value_counts().reset_index()
                 contagem.columns = ["Opção", "Quantidade"]
                 
-                # 2. Cria o gráfico de Barras
                 fig_bar = px.bar(
                     contagem, 
                     x="Opção", 
                     y="Quantidade", 
-                    text_auto=True, # Mostra o número em cima da barra
+                    text_auto=True,
                     title=f"Distribuição: {graf_sel}"
                 )
                 
-                # Ordena as barras da maior para a menor
                 fig_bar.update_layout(xaxis={'categoryorder':'total descending'})
-                
                 st.plotly_chart(fig_bar, use_container_width=True)
             else:
                 st.warning("Selecione atributos no topo.")
@@ -298,8 +303,13 @@ if 'df_final' in st.session_state:
         c2.dataframe(vol_por_agente, hide_index=True, use_container_width=True)
         st.divider()
         st.subheader("🕵️ Detalhe por Agente")
-        # Aqui "Expansão" vai aparecer na lista se estiver em cols_usuario
-        cruzamento_agente = st.selectbox("Cruzar Atendente com:", ["Status do atendimento"] + cols_usuario)
+        
+        # --- CORREÇÃO DA DUPLICIDADE ---
+        # Cria uma lista começando com "Status", adiciona os outros, e remove duplicados mantendo a ordem.
+        opcoes_cruzamento = ["Status do atendimento"] + [c for c in cols_usuario if c != "Status do atendimento"]
+        
+        cruzamento_agente = st.selectbox("Cruzar Atendente com:", opcoes_cruzamento)
+        
         if cruzamento_agente in df.columns:
             df_agente_cross = df.dropna(subset=[cruzamento_agente])
             fig_ag = px.histogram(df_agente_cross, x="Atendente", color=cruzamento_agente, barmode="group", text_auto=True)
@@ -310,7 +320,7 @@ if 'df_final' in st.session_state:
         has_motivo = "Motivo de Contato" in df.columns
         has_status = "Status do atendimento" in df.columns
         has_tipo = "Tipo de Atendimento" in df.columns
-        has_expansao = "Expansão" in df.columns  # Verifica se existe Expansão
+        has_expansao = COL_EXPANSAO in df.columns
         
         # 1. Status x Motivo
         if has_motivo and has_status:
@@ -332,11 +342,11 @@ if 'df_final' in st.session_state:
             st.plotly_chart(fig_cross2, use_container_width=True)
             st.divider()
 
-        # 3. NOVO: Expansão x Motivo (Se existir a coluna)
+        # 3. Expansão x Motivo
         if has_motivo and has_expansao:
-            st.subheader("Expansão x Motivo")
-            df_cross3 = df.dropna(subset=["Motivo de Contato", "Expansão"])
-            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color="Expansão", 
+            st.subheader(f"{COL_EXPANSAO} x Motivo")
+            df_cross3 = df.dropna(subset=["Motivo de Contato", COL_EXPANSAO])
+            fig_cross3 = px.histogram(df_cross3, y="Motivo de Contato", color=COL_EXPANSAO, 
                                      barmode="stack", text_auto=True, height=600)
             fig_cross3.update_layout(yaxis={'categoryorder':'total ascending'})
             st.plotly_chart(fig_cross3, use_container_width=True)
@@ -350,26 +360,20 @@ if 'df_final' in st.session_state:
             lista_geral = pd.concat([df[col_m1], df[col_m2]])
             ranking_global = lista_geral.value_counts().reset_index()
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
-            
-            # Ordena do menor para o maior para o gráfico ficar bonito (maior no topo)
             ranking_global = ranking_global.sort_values(by="Incidência Total", ascending=True)
-
+            
             c_rank1, c_rank2 = st.columns([2, 1])
             with c_rank1:
-                # Cálculo inteligente de altura: 400px base + 30px por motivo extra
+                # Altura dinâmica
                 altura_dinamica = max(400, len(ranking_global) * 30)
                 
                 fig_global = px.bar(ranking_global, x="Incidência Total", y="Motivo Unificado", 
                                     orientation='h', text_auto=True, 
                                     title="Todos os Motivos (Somando Motivo 1 + 2)",
-                                    height=altura_dinamica) # <--- Altura ajustável
-                
-                # Garante que mostre todas as categorias no eixo Y
+                                    height=altura_dinamica)
                 fig_global.update_layout(yaxis={'type': 'category'})
                 st.plotly_chart(fig_global, use_container_width=True)
-                
             with c_rank2:
-                # Tabela ordenada decrescente (maiores primeiro) para leitura
                 st.dataframe(ranking_global.sort_values(by="Incidência Total", ascending=False), use_container_width=True, hide_index=True)
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
@@ -392,48 +396,39 @@ if 'df_final' in st.session_state:
         if ocultar_vazios: df_view = df_view[df_view["Qtd. Atributos"] > 0]
         if ver_complexas: df_view = df_view[df_view["Qtd. Atributos"] >= 2]
 
-        # --- FILTROS EM CASCATA (Nível 1 e Nível 2) ---
+        # --- FILTROS EM CASCATA ---
         st.divider()
         st.caption("🔎 Filtros Avançados (Cascata)")
         
-        # === NÍVEL 1 ===
+        # NÍVEL 1
         col_f1, col_v1 = st.columns(2)
         with col_f1:
-            # Padrão: Tenta selecionar "Tipo de Atendimento" se existir, senão pega o primeiro
             idx_tipo = 0
             if "Tipo de Atendimento" in cols_usuario:
                 idx_tipo = cols_usuario.index("Tipo de Atendimento") + 1
-            
             coluna_1 = st.selectbox("1º Filtro (Principal):", ["(Todos)"] + cols_usuario, index=idx_tipo)
         
         with col_v1:
-            filtro_ativo_1 = False
             if coluna_1 != "(Todos)":
                 opcoes_1 = df_view[coluna_1].dropna().unique()
                 valores_1 = st.multiselect(f"Selecione valores em '{coluna_1}':", options=opcoes_1)
                 if valores_1:
                     df_view = df_view[df_view[coluna_1].isin(valores_1)]
-                    filtro_ativo_1 = True
 
-        # === NÍVEL 2 (Só aparece se o Nível 1 estiver ativo ou selecionado) ===
+        # NÍVEL 2
         if coluna_1 != "(Todos)":
             st.markdown("⬇️ *E dentro destes resultados...*")
             col_f2, col_v2 = st.columns(2)
             
             with col_f2:
-                # Remove a coluna já usada no nível 1 das opções
                 cols_restantes = [c for c in cols_usuario if c != coluna_1]
-                
-                # Tenta pré-selecionar "Motivo de Contato" para facilitar sua vida
                 idx_motivo = 0
                 if "Motivo de Contato" in cols_restantes:
                     idx_motivo = cols_restantes.index("Motivo de Contato") + 1
-
                 coluna_2 = st.selectbox("2º Filtro (Refinamento):", ["(Nenhum)"] + cols_restantes, index=idx_motivo)
 
             with col_v2:
                 if coluna_2 != "(Nenhum)":
-                    # IMPORTANTE: As opções aqui vêm do df_view JÁ FILTRADO pelo nível 1
                     opcoes_2 = df_view[coluna_2].dropna().unique()
                     valores_2 = st.multiselect(f"Selecione valores em '{coluna_2}':", options=opcoes_2)
                     if valores_2:
