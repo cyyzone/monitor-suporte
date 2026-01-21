@@ -380,23 +380,45 @@ if 'df_final' in st.session_state:
             top_motivo_txt = str(full_name).split(">")[-1].strip()
 
     # --- EXIBIÇÃO ---
-    kpi1.metric("Total Conversas", total_conv, delta=delta_total)
-    kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
-    kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
     
+    # KPI 1: Total de Conversas (INVERSO: Menos é Melhor)
+    kpi1.metric(
+        "Total Conversas", 
+        total_conv, 
+        delta=delta_total,
+        delta_color="inverse", # Se subir fica Vermelho, se cair fica Verde
+        help="Volume de chamados. Queda é considerada positiva (menos problemas)."
+    )
+    
+    # KPI 2: Classificados (NORMAL: Mais é melhor, pois indica organização)
+    kpi2.metric(
+        "Classificados", 
+        f"{preenchidos}", 
+        delta=delta_preenchidos
+    )
+    
+    # KPI 3: Resolvidos (NORMAL: Mais é melhor, indica produtividade)
+    kpi3.metric(
+        "Resolvidos", 
+        resolvidos, 
+        delta=delta_resolvidos
+    )
+    
+    # KPI 4: Tempo Médio (INVERSO: Menos tempo é melhor)
     kpi4.metric(
         "Tempo Médio", 
         tempo_str, 
-        delta=delta_exibicao, # <--- CORREÇÃO (Variável de texto formatado)
+        delta=delta_exibicao, 
         delta_color="inverse",
         help=help_text
     )
     
+    # KPI 5: Motivo Principal (Neutro)
     kpi5.metric(
         "Principal Motivo",
         top_motivo_txt,
         f"{qtd_top} casos",
-        delta_color="off" # Cinza, pois não é exatamente uma variação boa/ruim
+        delta_color="off" 
     )
 
     st.divider()
