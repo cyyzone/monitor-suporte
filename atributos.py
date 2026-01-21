@@ -329,14 +329,26 @@ if 'df_final' in st.session_state:
             ranking_global = lista_geral.value_counts().reset_index()
             ranking_global.columns = ["Motivo Unificado", "Incidência Total"]
             
+            # Ordena do menor para o maior para o gráfico ficar bonito (maior no topo)
+            ranking_global = ranking_global.sort_values(by="Incidência Total", ascending=True)
+
             c_rank1, c_rank2 = st.columns([2, 1])
             with c_rank1:
-                fig_global = px.bar(ranking_global.head(15), x="Incidência Total", y="Motivo Unificado", 
-                                    orientation='h', text_auto=True, title="Top 15 Motivos (Somando Motivo 1 + 2)")
-                fig_global.update_layout(yaxis={'categoryorder':'total ascending'})
+                # Cálculo inteligente de altura: 400px base + 30px por motivo extra
+                altura_dinamica = max(400, len(ranking_global) * 30)
+                
+                fig_global = px.bar(ranking_global, x="Incidência Total", y="Motivo Unificado", 
+                                    orientation='h', text_auto=True, 
+                                    title="Todos os Motivos (Somando Motivo 1 + 2)",
+                                    height=altura_dinamica) # <--- Altura ajustável
+                
+                # Garante que mostre todas as categorias no eixo Y
+                fig_global.update_layout(yaxis={'type': 'category'})
                 st.plotly_chart(fig_global, use_container_width=True)
+                
             with c_rank2:
-                st.dataframe(ranking_global, use_container_width=True, hide_index=True)
+                # Tabela ordenada decrescente (maiores primeiro) para leitura
+                st.dataframe(ranking_global.sort_values(by="Incidência Total", ascending=False), use_container_width=True, hide_index=True)
         else:
             st.error("As colunas de Motivo 1 e Motivo 2 não foram encontradas.")
 
