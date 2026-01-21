@@ -183,6 +183,20 @@ def process_data(conversas, mapping, admin_map):
         
     return df
 
+def format_human_time(minutes):
+    """Converte minutos em Texto (Min, Horas ou Dias)"""
+    if not minutes or pd.isna(minutes) or minutes == 0:
+        return "-"
+    
+    if minutes < 60:
+        return f"{minutes:.0f} min"
+    elif minutes < 1440: # Menos de 24h (1440 min)
+        hours = minutes / 60
+        return f"{hours:.1f} h"
+    else:
+        days = minutes / 1440
+        return f"{days:.1f} dias"
+
 def gerar_excel_multias(df, colunas_selecionadas):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -323,12 +337,31 @@ if 'df_final' in st.session_state:
     # KPI 4: Tempo Médio de Resolução
     tempo_medio = df["Tempo Resolução (min)"].mean() if "Tempo Resolução (min)" in df.columns else 0
     tempo_medio_prev = df_prev["Tempo Resolução (min)"].mean() if not df_prev.empty and "Tempo Resolução (min)" in df_prev.columns else 0
-    delta_tempo = tempo_medio - tempo_medio_prev # Se aumentou é vermelho (ruim), mas o streamlit trata delta positivo como verde padrão. Vamos inverter a cor manualmente se der.
+    delta_tempo_val = tempo_medio - tempo_medio_prev
+    
+    # Formata os valores para texto bonito (dias/horas)
+    tempo_str = format_human_time(tempo_medio)
+    delta_str = format_human_time(abs(delta_tempo_val)) # abs para tirar o sinal negativo do texto
+    
+    # Adiciona sinal + ou - manual no texto do delta
+    if delta_tempo_val > 0:
+        delta_str = f"🔺 {delta_str} (piorou)"
+    elif delta_tempo_val < 0:
+        delta_str = f"🔻 {delta_str} (melhorou)"
+    else:
+        delta_str = None
 
     kpi1.metric("Total Conversas", total_conv, delta=delta_total)
     kpi2.metric("Classificados", f"{preenchidos}", delta=delta_preenchidos)
     kpi3.metric("Resolvidos", resolvidos, delta=delta_resolvidos)
-    kpi4.metric("Tempo Médio Resolução", f"{tempo_medio:.1f} min", delta=f"{delta_tempo:.1f} min", delta_color="inverse") # inverse: se subir fica vermelho
+    
+    # KPI formatado
+    kpi4.metric(
+        "Tempo Médio Resolução", 
+        tempo_str, 
+        delta=delta_tempo_val, # O Streamlit usa o valor numérico para definir a cor (verde/vermelho)
+        delta_color="inverse"  # inverse: se o tempo subiu, fica vermelho (ruim)
+    )
 
     st.divider()
 
@@ -438,30 +471,43 @@ if 'df_final' in st.session_state:
         df_tempo = df.dropna(subset=["Tempo Resolução (min)"])
         
         if df_tempo.empty:
-            st.warning("Não há dados de tempo de resolução disponíveis (As conversas podem estar abertas ou a API não retornou as estatísticas).")
+            st.warning("Não há dados de tempo de resolução disponíveis.")
         else:
-            # Cards de Resumo
+            # Cards de Resumo Interno
             t1, t2, t3 = st.columns(3)
             med_resol = df_tempo["Tempo Resolução (min)"].mean()
             med_resp = df_tempo["Tempo Resposta (min)"].mean()
             
-            t1.metric("Tempo Médio de Resolução", f"{med_resol:.1f} min")
-            t2.metric("Tempo Médio 1ª Resposta", f"{med_resp:.1f} min")
+            # Usamos a função aqui também
+            t1.metric("Tempo Médio de Resolução", format_human_time(med_resol))
+            t2.metric("Tempo Médio 1ª Resposta", format_human_time(med_resp))
             t3.metric("Conversas com dados de tempo", len(df_tempo))
             
             st.divider()
             
-            # Gráfico 1: Quem é mais rápido? (Média de tempo por Agente)
-            st.subheader("⚡ Velocidade por Agente (Tempo de Resolução)")
-            tempo_agente = df_tempo.groupby("Atendente")["Tempo Resolução (min)"].mean().reset_index().sort_values("Tempo Resolução (min)")
+            # LÓGICA INTELIGENTE PARA GRÁFICOS:
+            # Se a média for maior que 3 horas (180 min), mostramos o gráfico em HORAS para facilitar a leitura
+            usar_horas = med_resol > 180
+            coluna_plot = "Tempo Resolução (min)"
+            sulfixo = "min"
+            
+            if usar_horas:
+                df_tempo["Tempo (Horas)"] = df_tempo["Tempo Resolução (min)"] / 60
+                coluna_plot = "Tempo (Horas)"
+                sulfixo = "horas"
+                st.info(f"💡 Como os tempos são longos, os gráficos abaixo foram convertidos para **Horas**.")
+
+            # Gráfico 1: Quem é mais rápido?
+            st.subheader("⚡ Velocidade por Agente")
+            tempo_agente = df_tempo.groupby("Atendente")[coluna_plot].mean().reset_index().sort_values(coluna_plot)
             
             fig_time_agente = px.bar(
                 tempo_agente, 
-                x="Tempo Resolução (min)", 
+                x=coluna_plot, 
                 y="Atendente", 
                 orientation='h', 
                 text_auto='.1f',
-                title="Média de Minutos para Resolver (Menor é melhor)"
+                title=f"Média de {sulfixo.capitalize()} para Resolver (Menor é melhor)"
             )
             st.plotly_chart(fig_time_agente, use_container_width=True)
             
@@ -469,19 +515,18 @@ if 'df_final' in st.session_state:
             if "Motivo de Contato" in df.columns:
                 st.divider()
                 st.subheader("🐢 Motivos mais demorados")
-                tempo_motivo = df_tempo.groupby("Motivo de Contato")["Tempo Resolução (min)"].mean().reset_index().sort_values("Tempo Resolução (min)", ascending=False)
+                tempo_motivo = df_tempo.groupby("Motivo de Contato")[coluna_plot].mean().reset_index().sort_values(coluna_plot, ascending=False)
                 
-                # Altura dinâmica
                 h_motivo = max(400, 100 + (len(tempo_motivo) * 30))
                 
                 fig_time_motivo = px.bar(
                     tempo_motivo, 
-                    x="Tempo Resolução (min)", 
+                    x=coluna_plot, 
                     y="Motivo de Contato", 
                     orientation='h', 
                     text_auto='.1f',
                     height=h_motivo,
-                    title="Média de Minutos por Motivo (Maior é mais complexo)"
+                    title=f"Média de {sulfixo.capitalize()} por Motivo"
                 )
                 fig_time_motivo.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_time_motivo, use_container_width=True)
