@@ -282,66 +282,117 @@ st.title("📆 Buscar conversas")
 # Container lateral sem st.form para permitir interação dinâmica
 # --- BARRA LATERAL (Nova Lógica) ---
 with st.sidebar:
-    st.header("Parâmetros de Busca")
+    st.header("Controle de Dados")
     
-    # Botão de Reset (Voltar ao Início)
-    # Colocamos no topo ou fim, aqui fica bom para fácil acesso
-    if st.button("🗑️ Limpar / Nova Busca", type="secondary"):
+    # 1. BOTÃO RESET (Limpar tudo)
+    if st.button("🗑️ Limpar Tela / Nova Busca", type="secondary", help="Limpa os resultados da tela e reseta filtros"):
         st.session_state['tickets_encontrados'] = []
         st.session_state['analises_ia'] = {}
-        st.rerun() # Recarrega a página zerada
+        st.rerun()
     
     st.divider()
 
+    # 2. FILTROS GERAIS (Servem tanto para o Banco quanto para API)
+    st.subheader("Filtros")
+    
+    # Data
     hoje = datetime.now()
     data_padrao_inicio = hoje - timedelta(days=7) 
-    periodo = st.date_input("Selecione o Período", (data_padrao_inicio, hoje), format="DD/MM/YYYY")
+    periodo = st.date_input("Período de Análise", (data_padrao_inicio, hoje), format="DD/MM/YYYY")
     
-    st.divider()
-    
-    # Campo Obrigatório
-    filtro_empresa_input = st.text_input("ID da Empresa (Obrigatório)*", placeholder="Ex: 123456")
-    
-    # (Removido o campo 'limite_seguranca' conforme solicitado)
+    # Empresa (Input único)
+    filtro_empresa_input = st.text_input(
+        "ID da Empresa (Intercom)", 
+        placeholder="Ex: 123456",
+        help="Obrigatório para buscar na API. Opcional para ler do Banco (traz tudo se vazio)."
+    )
 
     st.divider()
-    
-    # Botão Principal
-    botao_verificar = st.button("🔍 Verificar e Buscar", type="primary")
 
-# --- LÓGICA DE BUSCA E CONFIRMAÇÃO ---
-if botao_verificar:
-    # 1. VALIDAÇÃO: Bloqueia se não tiver ID
+    # 3. AÇÕES (Botões)
+    
+    # Ação A: Banco de Dados (Prioridade)
+    st.markdown("### ⚡ Modo Rápido")
+    btn_carregar_banco = st.button("📂 Carregar do Banco de Dados", type="primary", use_container_width=True)
+    st.caption("Consulta tickets já salvos no MongoDB.")
+
+    st.divider()
+
+    # Ação B: API (Sincronização)
+    st.markdown("### ☁️ Modo Sincronização")
+    st.caption("Baixa dados novos do Intercom e atualiza o Banco.")
+    btn_sincronizar = st.button("🔄 Baixar da API e Salvar", use_container_width=True)
+
+
+# --- LÓGICA: BOTÃO CARREGAR DO BANCO (MongoDB) ---
+if btn_carregar_banco:
+    # Define o filtro (se vazio, é None, ou seja, busca tudo)
+    filtro_id = filtro_empresa_input.strip() if filtro_empresa_input else None
+    
+    with st.spinner("Conectando ao MongoDB Atlas..."):
+        # Chama a função nova do seu utils.py
+        tickets_db = utils.carregar_tickets_mongo(filtro_id)
+        
+        # Filtra por data localmente (pois o Mongo traz histórico)
+        # Se quiser filtrar data direto no Mongo, precisa ajustar a query no utils.
+        # Aqui fazemos um filtro rápido em memória:
+        if isinstance(periodo, tuple) and len(periodo) == 2:
+            dt_ini, dt_fim = periodo
+            ts_ini = int(datetime.combine(dt_ini, dtime.min).timestamp())
+            ts_fim = int(datetime.combine(dt_fim, dtime.max).timestamp())
+            
+            # Filtra a lista retornada pelo banco
+            tickets_db = [t for t in tickets_db if ts_ini <= t['updated_at'] <= ts_fim]
+
+    # Atualiza a tela
+    st.session_state['tickets_encontrados'] = tickets_db
+    
+    if not tickets_db:
+        st.warning("⚠️ Nenhum ticket encontrado no Banco de Dados para este filtro.")
+        st.info("Dica: Tente usar o botão 'Baixar da API' para popular o banco primeiro.")
+    else:
+        st.success(f"✅ {len(tickets_db)} tickets carregados do cache!")
+        time.sleep(1) # Pequena pausa para ler a mensagem
+        st.rerun()
+
+
+# --- LÓGICA: BOTÃO SINCRONIZAR (API -> Mongo) ---
+if btn_sincronizar:
+    # 1. Validação de Segurança
     if not filtro_empresa_input:
-        st.error("⚠️ O campo **ID da Empresa** é obrigatório!")
-        st.stop() 
+        st.error("⚠️ Para baixar da API, o **ID da Empresa** é obrigatório!")
+        st.stop()
         
-    if isinstance(periodo, tuple) and len(periodo) == 2:
-        data_inicio, data_fim = periodo
+    if not (isinstance(periodo, tuple) and len(periodo) == 2):
+        st.error("⚠️ Selecione uma data inicial e final.")
+        st.stop()
+
+    data_inicio, data_fim = periodo
+
+    # 2. Validação da Empresa (Check Rápido)
+    with st.status("🕵️ Validando empresa...", expanded=True) as status:
+        id_oficial, nome_oficial = buscar_id_intercom_da_empresa(filtro_empresa_input)
         
-        # 2. VALIDAÇÃO PRÉVIA (Rápida)
-        # Isso previne que você inicie uma busca errada
-        with st.status("🕵️ Validando dados...", expanded=True) as status:
-            st.write("Conectando API Intercom...")
-            id_oficial, nome_oficial = buscar_id_intercom_da_empresa(filtro_empresa_input)
-            
-            if not id_oficial:
-                status.update(label="❌ Empresa não encontrada!", state="error")
-                st.error(f"Não encontramos nenhuma empresa com o ID: '{filtro_empresa_input}'")
-                st.stop() # Para tudo aqui se estiver errado
-            
-            status.update(label="✅ Empresa Localizada!", state="complete")
-            
-        # 3. FEEDBACK VISUAL
-        st.info(f"Iniciando extração para: **{nome_oficial}** (ID: {id_oficial})")
+        if not id_oficial:
+            status.update(label="❌ Empresa não encontrada!", state="error")
+            st.error(f"ID inválido: '{filtro_empresa_input}'")
+            st.stop()
         
-        # Início da Busca Pesada
-        texto_status = st.empty()
-        barra_progresso = st.progress(0)
-        
-        carregar_tickets_por_periodo.clear()
-        
-        resultado, stats = carregar_tickets_por_periodo(
+        status.update(label=f"✅ Confirmado: {nome_oficial}", state="complete")
+
+    # 3. Download (Processo Pesado)
+    st.info(f"Iniciando download de tickets: **{nome_oficial}**")
+    
+    # Barras de progresso visual
+    barra_progresso = st.progress(0)
+    texto_status = st.empty()
+    
+    # Limpa cache da função para garantir dados frescos
+    carregar_tickets_por_periodo.clear()
+    
+    try:
+        # Busca na API
+        novos_tickets, stats = carregar_tickets_por_periodo(
             data_inicio, data_fim, 
             id_empresa_intercom=id_oficial,
             nome_empresa_fixo=nome_oficial,
@@ -349,17 +400,25 @@ if botao_verificar:
             _ui_progress=(barra_progresso, texto_status)
         )
         
-        # Finalização Visual
-        barra_progresso.progress(100)
-        texto_status.success(f"✅ Busca concluída! {len(resultado)} tickets processados.")
-        time.sleep(1)
-        barra_progresso.empty()
-        
-        st.session_state['tickets_encontrados'] = resultado
-        st.rerun() # Atualiza a tela com os resultados
-
-    else:
-        st.error("Selecione data inicial e final.")
+        # 4. Salvar no MongoDB
+        if novos_tickets:
+            texto_status.text("💾 Salvando dados no MongoDB Atlas...")
+            qtd_salva = utils.salvar_lote_tickets_mongo(novos_tickets)
+            
+            barra_progresso.progress(100)
+            st.success(f"🎉 Sucesso! {len(novos_tickets)} baixados da API. {qtd_salva} atualizados no Banco.")
+            
+            # Recarrega do banco para garantir que a visualização está igual ao salvo
+            st.session_state['tickets_encontrados'] = utils.carregar_tickets_mongo(id_oficial)
+            
+            time.sleep(2)
+            st.rerun()
+        else:
+            barra_progresso.empty()
+            st.warning("Nenhum ticket encontrado neste período na API.")
+            
+    except Exception as e:
+        st.error(f"Erro durante a sincronização: {e}")
 
 # --- 7. EXIBIÇÃO DOS RESULTADOS ---
 dados = st.session_state['tickets_encontrados']
