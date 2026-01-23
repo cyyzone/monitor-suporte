@@ -146,7 +146,8 @@ def salvar_lote_tickets_mongo(lista_tickets):
 
 def carregar_tickets_mongo(termo_busca=None):
     """
-    Lê os tickets do banco com busca FLEXÍVEL (ID ou Nome).
+    Traz tickets. Se termo_busca for None, traz TODOS (limite de 1000).
+    Se tiver termo, busca por ID, ID Interno ou Nome.
     """
     client = init_mongo_connection()
     if not client: return []
@@ -156,25 +157,22 @@ def carregar_tickets_mongo(termo_busca=None):
     
     filtro = {}
     
-    if termo_busca:
+    # Só aplica filtro se o usuário digitou algo
+    if termo_busca and str(termo_busca).strip() != "":
         termo_str = str(termo_busca).strip()
+        regex_busca = {"$regex": termo_str, "$options": "i"}
         
-        # AQUI ESTÁ A MÁGICA:
-        # Procura se o termo digitado é igual ao ID 
-        # OU se o termo faz parte do nome do Cliente (busca parcial e ignora maiúsculas)
         filtro = {
             "$or": [
-                {"id_interno": termo_str},
-                {"id": termo_str},
-                {"cliente": {"$regex": termo_str, "$options": "i"}} 
+                {"id_interno": termo_str},          # ID exato da empresa
+                {"cliente": regex_busca},           # Nome da empresa (Energisa...)
+                {"autor_nome": regex_busca},        # Nome do usuário
+                {"autor_email": regex_busca},       # Email
+                {"id": termo_str}                   # ID do Ticket
             ]
         }
     
-    # Busca e ordena por data (mais recente primeiro)
-    cursor = collection.find(filtro, {"_id": 0}).sort("updated_at", -1)
+    # Traz os últimos 1000 tickets para não travar a tela
+    cursor = collection.find(filtro, {"_id": 0}).sort("updated_at", -1).limit(1000)
     
-    lista = list(cursor)
-    # Print para você ver no terminal o que está acontecendo
-    print(f"🔍 DEBUG DB: Busquei por '{termo_busca}' e achei {len(lista)} tickets.")
-    
-    return lista
+    return list(cursor)
