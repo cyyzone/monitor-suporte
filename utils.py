@@ -144,8 +144,10 @@ def salvar_lote_tickets_mongo(lista_tickets):
         return resultado.upserted_count + resultado.modified_count
     return 0
 
-def carregar_tickets_mongo(id_empresa=None, dias_atras=30):
-    """Lê os tickets do banco (muito mais rápido que API)."""
+def carregar_tickets_mongo(termo_busca=None):
+    """
+    Lê os tickets do banco com busca FLEXÍVEL (ID ou Nome).
+    """
     client = init_mongo_connection()
     if not client: return []
     
@@ -153,12 +155,26 @@ def carregar_tickets_mongo(id_empresa=None, dias_atras=30):
     collection = db["tickets"]
     
     filtro = {}
-    if id_empresa:
-        # Filtra pelo ID da empresa (string)
-        filtro["id_interno"] = str(id_empresa)
+    
+    if termo_busca:
+        termo_str = str(termo_busca).strip()
+        
+        # AQUI ESTÁ A MÁGICA:
+        # Procura se o termo digitado é igual ao ID 
+        # OU se o termo faz parte do nome do Cliente (busca parcial e ignora maiúsculas)
+        filtro = {
+            "$or": [
+                {"id_interno": termo_str},
+                {"id": termo_str},
+                {"cliente": {"$regex": termo_str, "$options": "i"}} 
+            ]
+        }
     
     # Busca e ordena por data (mais recente primeiro)
-    # Excluímos o campo '_id' do Mongo para não atrapalhar o Python
     cursor = collection.find(filtro, {"_id": 0}).sort("updated_at", -1)
     
-    return list(cursor)
+    lista = list(cursor)
+    # Print para você ver no terminal o que está acontecendo
+    print(f"🔍 DEBUG DB: Busquei por '{termo_busca}' e achei {len(lista)} tickets.")
+    
+    return lista
