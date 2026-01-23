@@ -3,4 +3,5 @@ requests
 pandas
 plotly
 XlsxWriter
+pymongo
 
