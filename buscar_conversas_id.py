@@ -99,7 +99,7 @@ def buscar_historico_completo(conversation_id):
 
 def consultar_ia_gemma_premium(historico_conversa):
     """Envia o histórico para a IA analisar."""
-    if "SUA_CHAVE" in AI_API_KEY: return {"erro": "⚠️ Configure a API Key."}
+    if "SUA_CHAVE" in GEMINI_API_KEY: return {"erro": "⚠️ Configure a API Key."}
     prompt_sistema = "Você é um analisador Sênior de Customer Success. Seja formal e objetivo."
     prompt_usuario = f"""
     Analise esta conversa:
@@ -118,7 +118,7 @@ def consultar_ia_gemma_premium(historico_conversa):
     }}
     """
     modelo = "gemma-3-12b-it" 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={AI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_API_KEY}"
     try:
         response = requests.post(url, json={"contents": [{"parts": [{"text": prompt_sistema + "\n" + prompt_usuario}]}]}, headers={"Content-Type": "application/json"})
         if response.status_code == 200:
