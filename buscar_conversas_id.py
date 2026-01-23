@@ -326,33 +326,49 @@ with st.sidebar:
 
 # --- LÓGICA: BOTÃO CARREGAR DO BANCO (MongoDB) ---
 if btn_carregar_banco:
-    # Define o filtro (se vazio, é None, ou seja, busca tudo)
-    filtro_id = filtro_empresa_input.strip() if filtro_empresa_input else None
+    termo = filtro_empresa_input.strip() if filtro_empresa_input else None
     
-    with st.spinner("Conectando ao MongoDB Atlas..."):
-        # Chama a função nova do seu utils.py
-        tickets_db = utils.carregar_tickets_mongo(filtro_id)
+    with st.spinner("Lendo banco de dados..."):
+        # 1. Busca TUDO o que tem no banco correspondente ao texto (ignora data por enquanto)
+        todos_tickets = utils.carregar_tickets_mongo(termo)
         
-        # Filtra por data localmente (pois o Mongo traz histórico)
-        # Se quiser filtrar data direto no Mongo, precisa ajustar a query no utils.
-        # Aqui fazemos um filtro rápido em memória:
+        # 2. Diagnóstico (Mostra pro usuário o que aconteceu)
+        if not todos_tickets:
+            st.warning(f"O Banco de dados não retornou nada para a busca: '{termo or 'Vazio'}'")
+            st.stop()
+            
+        st.toast(f"Banco retornou {len(todos_tickets)} registros brutos.", icon="💾")
+
+        # 3. Filtro de Data (Python) - Vamos fazer com tratamento de erro
+        tickets_filtrados = []
+        
         if isinstance(periodo, tuple) and len(periodo) == 2:
             dt_ini, dt_fim = periodo
+            # Converte para timestamp (início do dia inicial, fim do dia final)
             ts_ini = int(datetime.combine(dt_ini, dtime.min).timestamp())
             ts_fim = int(datetime.combine(dt_fim, dtime.max).timestamp())
             
-            # Filtra a lista retornada pelo banco
-            tickets_db = [t for t in tickets_db if ts_ini <= t['updated_at'] <= ts_fim]
+            for t in todos_tickets:
+                # Proteção caso o ticket não tenha data
+                data_ticket = t.get('updated_at', 0)
+                if ts_ini <= data_ticket <= ts_fim:
+                    tickets_filtrados.append(t)
+            
+            # DIAGNÓSTICO DE DATA
+            removidos = len(todos_tickets) - len(tickets_filtrados)
+            if removidos > 0:
+                st.caption(f"⚠️ Atenção: **{removidos}** tickets foram escondidos pelo filtro de data ({dt_ini.strftime('%d/%m')} a {dt_fim.strftime('%d/%m')}).")
+        else:
+            tickets_filtrados = todos_tickets
 
-    # Atualiza a tela
-    st.session_state['tickets_encontrados'] = tickets_db
+    # 4. Atualiza a tela
+    st.session_state['tickets_encontrados'] = tickets_filtrados
     
-    if not tickets_db:
-        st.warning("⚠️ Nenhum ticket encontrado no Banco de Dados para este filtro.")
-        st.info("Dica: Tente usar o botão 'Baixar da API' para popular o banco primeiro.")
+    if not tickets_filtrados:
+        st.error("Nenhum ticket restou após o filtro de data! Tente aumentar o período na barra lateral.")
     else:
-        st.success(f"✅ {len(tickets_db)} tickets carregados do cache!")
-        time.sleep(1) # Pequena pausa para ler a mensagem
+        st.success(f"✅ Mostrando {len(tickets_filtrados)} tickets.")
+        time.sleep(1)
         st.rerun()
 
 
