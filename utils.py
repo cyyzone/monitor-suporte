@@ -1,6 +1,7 @@
 import streamlit as st # O arquiteto. Eu preciso dele pra acessar os 'secrets' (o cofre de senhas).
 import requests # O motoboy. É ele que leva e traz as mensagens pra API.
 import time # O relógio. Essencial pra gente saber quanto tempo esperar quando a API cansa.
+import pymongo
 
 def check_password():
     """Gerencia autenticação simples via secrets."""
@@ -104,3 +105,60 @@ def send_slack_alert(message):
         requests.post(webhook, json=payload)
     except Exception as e: # Se o Slack estiver fora do ar, eu anoto o erro.
         print(f"Erro ao enviar alerta Slack: {e}")
+
+# Variável global para manter a conexão aberta (cache de conexão)
+@st.cache_resource
+def init_mongo_connection():
+    """Conecta ao MongoDB Atlas usando a URI dos secrets."""
+    try:
+        uri = st.secrets["MONGO_URI"]
+        client = pymongo.MongoClient(uri)
+        # Testa a conexão
+        client.admin.command('ping')
+        return client
+    except Exception as e:
+        st.error(f"Erro ao conectar no MongoDB: {e}")
+        return None
+
+def salvar_lote_tickets_mongo(lista_tickets):
+    """Salva/Atualiza uma lista de tickets no MongoDB."""
+    client = init_mongo_connection()
+    if not client: return 0
+    
+    db = client["suporte_db"] # Nome do seu banco
+    collection = db["tickets"] # Nome da 'tabela'
+    
+    operacoes = []
+    for ticket in lista_tickets:
+        # UpdateOne com upsert=True: Se existe, atualiza. Se não, cria.
+        # Usamos o 'id' do Intercom como chave única
+        op = pymongo.UpdateOne(
+            {"id": ticket["id"]}, 
+            {"$set": ticket}, 
+            upsert=True
+        )
+        operacoes.append(op)
+    
+    if operacoes:
+        resultado = collection.bulk_write(operacoes)
+        return resultado.upserted_count + resultado.modified_count
+    return 0
+
+def carregar_tickets_mongo(id_empresa=None, dias_atras=30):
+    """Lê os tickets do banco (muito mais rápido que API)."""
+    client = init_mongo_connection()
+    if not client: return []
+    
+    db = client["suporte_db"]
+    collection = db["tickets"]
+    
+    filtro = {}
+    if id_empresa:
+        # Filtra pelo ID da empresa (string)
+        filtro["id_interno"] = str(id_empresa)
+    
+    # Busca e ordena por data (mais recente primeiro)
+    # Excluímos o campo '_id' do Mongo para não atrapalhar o Python
+    cursor = collection.find(filtro, {"_id": 0}).sort("updated_at", -1)
+    
+    return list(cursor)
