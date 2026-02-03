@@ -204,11 +204,11 @@ def atualizar_painel(): # Função principal que atualiza o painel.
         volume_recente = stats_rec.get(sid, 0) # Pego o volume recente (últimos 30min)
         
         # Regras de Alerta Visual:
-        alerta = "⚠️" if abertos >= 5 else "" # 5+ tickets abertos? Perigo!
+        alerta = "⚠️" if abertos >= 10 else "" # 5+ tickets abertos? Perigo!
         raio = "⚡" if volume_recente >= 3 else "" # 3+ tickets em 30min? Tá com fila!
         
         # Se bateu nos limites, anoto o nome dele na lista negra pra mandar pro Slack.
-        if abertos >= 5: # Sobrecarga Individual
+        if abertos >= 10: # Sobrecarga Individual
             lista_sobrecarga.append(f"{info['name']} ({abertos})") # Nome + número de abertos
             
         if volume_recente >= 3: # Alta Demanda Recente
@@ -240,7 +240,7 @@ def atualizar_painel(): # Função principal que atualiza o painel.
     # 3. Tem gente sobrecarregada? (Uso a lista que criei ali em cima)
     if lista_sobrecarga:
         nomes = ", ".join(lista_sobrecarga)
-        msg_alerta.append(f"⚠️ *SOBRECARGA:* Agentes com 5+ tickets: {nomes}")
+        msg_alerta.append(f"⚠️ *SOBRECARGA:* Agentes com 10+ tickets: {nomes}")
 
     # 4. Tem gente na correria?
     if lista_alta_demanda:
@@ -402,11 +402,12 @@ def atualizar_painel(): # Função principal que atualiza o painel.
     with st.expander("ℹ️ **Legenda e Ações**"): # Legenda no final pra ninguém ficar perdido.
         st.markdown("""
         * 🟢/🔴 **Status:** Online ou Ausente (Away).
-        * ⚠️ **Sobrecarga:** Agente com 5+ tickets abertos.
+        * ⚠️ **Sobrecarga:** Agente com 10+ tickets abertos.
         * ⚡ **Alta Demanda:** Agente recebeu 3+ tickets em 30min.
         """)
 
 atualizar_painel()
+
 
 
 
