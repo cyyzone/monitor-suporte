@@ -164,10 +164,10 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_aircall_stats(ts_inicio):
-    """Busca chamadas no Aircall filtrando APENAS pelos agentes do mapa."""
+    """Busca chamadas Aircall e retorna: Stats por Agente, Totais e DETALHES."""
     
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
-        return {}, 0, 0
+        return {}, 0, 0, {} # <--- Retorna 4 coisas agora
 
     url = "https://api.aircall.io/v1/calls"
     auth = HTTPBasicAuth(st.secrets["AIRCALL_ID"], st.secrets["AIRCALL_TOKEN"])
@@ -180,6 +180,7 @@ def get_aircall_stats(ts_inicio):
     }
     
     stats_agente = {} 
+    detalhes_ligacoes = {} # <--- Novo dicionário para guardar os links
     total_atendidas = 0
     total_perdidas = 0
     page = 1
@@ -198,24 +199,29 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
-                # 1. Identifica quem estava na ligação (ou quem perdeu)
                 user = call.get('user')
                 email = user.get('email') if user else None
                 
-                # 🛑 O FILTRO DE OURO: 
-                # Se o e-mail NÃO estiver na sua lista de suporte, ignora a ligação completamente.
                 if email not in AGENTS_MAP:
                     continue 
 
-                # 2. Se passou pelo filtro, contabiliza
                 status = call.get('status')
                 
                 if status == 'done':
                     total_atendidas += 1
                     
-                    # Contagem individual
                     intercom_id = AGENTS_MAP[email]
                     stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
+                    
+                    # --- GUARDA OS DETALHES DA LIGAÇÃO AQUI ---
+                    if intercom_id not in detalhes_ligacoes: detalhes_ligacoes[intercom_id] = []
+                    
+                    detalhes_ligacoes[intercom_id].append({
+                        'id': call['id'],
+                        'started_at': call.get('started_at', 0),
+                        'link': f"https://dashboard.aircall.io/calls/{call['id']}", # Link Direto
+                        'number': call.get('raw_digits', 'Desconhecido')
+                    })
                             
                 elif status == 'missed': 
                     total_perdidas += 1
@@ -228,7 +234,7 @@ def get_aircall_stats(ts_inicio):
             print(f"Erro Aircall: {e}")
             break
             
-    return stats_agente, total_atendidas, total_perdidas
+    return stats_agente, total_atendidas, total_perdidas, detalhes_ligacoes
 
 # @st.fragment faz esse pedaço rodar sozinho a cada 60s
 @st.fragment(run_every=60)
@@ -265,7 +271,7 @@ def atualizar_painel():
     ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
     # --- BUSCA AIRCALL ---
-    stats_aircall, total_atendidas, total_perdidas = get_aircall_stats(ts_inicio)
+    stats_aircall, total_atendidas, total_perdidas, detalhes_calls = get_aircall_stats(ts_inicio)
     # --- PROCESSAMENTO ---
     online = 0
     tabela = []
@@ -408,15 +414,36 @@ def atualizar_painel():
                 nome = admins.get(sid, {}).get('name', 'Desconhecido')
                 tickets = detalhes_agente.get(sid, [])
                 
+                # --- NOVO: PEGA DADOS DAS CHAMADAS ---
+                qtd_calls = stats_aircall.get(sid, 0)
+                calls_agente = detalhes_calls.get(sid, []) # Pega a lista de links
+                
                 with cols[i % 3]:
-                    with st.expander(f"{nome} ({len(tickets)})"):
-                        if not tickets:
-                            st.caption("Sem tickets no período.")
-                        else:
+                    # Atualizei o título para mostrar Tickets (T) e Calls (C)
+                    with st.expander(f"{nome} (T: {len(tickets)} | C: {qtd_calls})"):
+                        
+                        # --- 1. LISTA DE TICKETS (Igual antes) ---
+                        if tickets:
+                            st.caption("📨 **Tickets Intercom**")
                             tickets_sorted = sorted(tickets, key=lambda x: x['created_at'], reverse=True)
                             for t in tickets_sorted:
                                 hora = datetime.fromtimestamp(t['created_at'], tz=FUSO_BR).strftime('%H:%M')
-                                st.markdown(f"⏰ **{hora}** - [Abrir #{t['id']}]({t['link']})")
+                                st.markdown(f"⏰ {hora} - [Abrir Ticket]({t['link']})")
+                        
+                        # --- 2. LISTA DE LIGAÇÕES (NOVO) ---
+                        if calls_agente:
+                            if tickets: st.markdown("---") # Divisória se tiver os dois
+                            st.caption("📞 **Ligações Aircall**")
+                            
+                            calls_sorted = sorted(calls_agente, key=lambda x: x['started_at'], reverse=True)
+                            
+                            for c in calls_sorted:
+                                hora = datetime.fromtimestamp(c['started_at'], tz=FUSO_BR).strftime('%H:%M')
+                                # Link direto para a gravação/detalhes
+                                st.markdown(f"🎧 **{hora}** - [Ouvir Ligação]({c['link']})")
+                                
+                        if not tickets and not calls_agente:
+                            st.caption("Sem atividades no período.")
         else:
             st.info("Nenhum agente encontrado no time.")
 
@@ -477,6 +504,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
