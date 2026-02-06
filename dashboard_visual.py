@@ -164,7 +164,7 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_aircall_stats(ts_inicio):
-    """Busca chamadas no Aircall: por agente e totais (atendidas/perdidas)."""
+    """Busca chamadas no Aircall filtrando APENAS pelos agentes do mapa."""
     
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
         return {}, 0, 0
@@ -176,7 +176,7 @@ def get_aircall_stats(ts_inicio):
         "from": ts_inicio,
         "order": "desc",
         "per_page": 50,
-        "direction": "inbound" # Trazemos todas as recebidas para contar perdidas também
+        "direction": "inbound" 
     }
     
     stats_agente = {} 
@@ -198,21 +198,26 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
+                # 1. Identifica quem estava na ligação (ou quem perdeu)
+                user = call.get('user')
+                email = user.get('email') if user else None
+                
+                # 🛑 O FILTRO DE OURO: 
+                # Se o e-mail NÃO estiver na sua lista de suporte, ignora a ligação completamente.
+                if email not in AGENTS_MAP:
+                    continue 
+
+                # 2. Se passou pelo filtro, contabiliza
                 status = call.get('status')
                 
-                # Contagem Geral
                 if status == 'done':
                     total_atendidas += 1
                     
-                    # Contagem por Agente (Só para atendidas)
-                    user = call.get('user')
-                    if user:
-                        email = user.get('email')
-                        if email in AGENTS_MAP:
-                            intercom_id = AGENTS_MAP[email]
-                            stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
+                    # Contagem individual
+                    intercom_id = AGENTS_MAP[email]
+                    stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
                             
-                elif status == 'missed': # Chamada perdida
+                elif status == 'missed': 
                     total_perdidas += 1
             
             if data.get('meta', {}).get('next_page_link'):
@@ -472,6 +477,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
