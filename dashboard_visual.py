@@ -164,10 +164,10 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_aircall_stats(ts_inicio):
-    """Busca chamadas Aircall e retorna: Stats por Agente, Totais e DETALHES."""
+    """Busca chamadas Aircall e retorna: Stats por Agente, Totais e DETALHES (Link de Áudio)."""
     
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
-        return {}, 0, 0, {} # <--- Retorna 4 coisas agora
+        return {}, 0, 0, {}
 
     url = "https://api.aircall.io/v1/calls"
     auth = HTTPBasicAuth(st.secrets["AIRCALL_ID"], st.secrets["AIRCALL_TOKEN"])
@@ -180,7 +180,7 @@ def get_aircall_stats(ts_inicio):
     }
     
     stats_agente = {} 
-    detalhes_ligacoes = {} # <--- Novo dicionário para guardar os links
+    detalhes_ligacoes = {} 
     total_atendidas = 0
     total_perdidas = 0
     page = 1
@@ -213,13 +213,14 @@ def get_aircall_stats(ts_inicio):
                     intercom_id = AGENTS_MAP[email]
                     stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
                     
-                    # --- GUARDA OS DETALHES DA LIGAÇÃO AQUI ---
                     if intercom_id not in detalhes_ligacoes: detalhes_ligacoes[intercom_id] = []
                     
+                    # --- CORREÇÃO DO LINK AQUI ---
+                    # Agora aponta direto para o recording no assets
                     detalhes_ligacoes[intercom_id].append({
                         'id': call['id'],
                         'started_at': call.get('started_at', 0),
-                        'link': f"https://dashboard.aircall.io/calls/{call['id']}", # Link Direto
+                        'link': f"https://assets.aircall.io/calls/{call['id']}/recording", # <--- LINK
                         'number': call.get('raw_digits', 'Desconhecido')
                     })
                             
@@ -504,6 +505,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
