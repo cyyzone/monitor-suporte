@@ -164,11 +164,10 @@ def get_latest_conversations(team_id, ts_inicio, limit=10):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_aircall_stats(ts_inicio):
-    """Busca chamadas atendidas no Aircall e agrupa pelo ID do Intercom."""
+    """Busca chamadas no Aircall: por agente e totais (atendidas/perdidas)."""
     
-    # Verifica se as chaves existem
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
-        return {}
+        return {}, 0, 0
 
     url = "https://api.aircall.io/v1/calls"
     auth = HTTPBasicAuth(st.secrets["AIRCALL_ID"], st.secrets["AIRCALL_TOKEN"])
@@ -177,11 +176,12 @@ def get_aircall_stats(ts_inicio):
         "from": ts_inicio,
         "order": "desc",
         "per_page": 50,
-        "direction": "inbound", # Apenas recebidas
-        "status": "done"        # Apenas atendidas/finalizadas
+        "direction": "inbound" # Trazemos todas as recebidas para contar perdidas também
     }
     
-    stats = {} 
+    stats_agente = {} 
+    total_atendidas = 0
+    total_perdidas = 0
     page = 1
     
     while True:
@@ -198,14 +198,22 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
-                user = call.get('user')
-                if user:
-                    email = user.get('email')
+                status = call.get('status')
+                
+                # Contagem Geral
+                if status == 'done':
+                    total_atendidas += 1
                     
-                    # AQUI USAMOS O SEU MAPA PARA TRADUZIR
-                    if email in AGENTS_MAP:
-                        intercom_id = AGENTS_MAP[email]
-                        stats[intercom_id] = stats.get(intercom_id, 0) + 1
+                    # Contagem por Agente (Só para atendidas)
+                    user = call.get('user')
+                    if user:
+                        email = user.get('email')
+                        if email in AGENTS_MAP:
+                            intercom_id = AGENTS_MAP[email]
+                            stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
+                            
+                elif status == 'missed': # Chamada perdida
+                    total_perdidas += 1
             
             if data.get('meta', {}).get('next_page_link'):
                 page += 1
@@ -215,7 +223,7 @@ def get_aircall_stats(ts_inicio):
             print(f"Erro Aircall: {e}")
             break
             
-    return stats
+    return stats_agente, total_atendidas, total_perdidas
 
 # @st.fragment faz esse pedaço rodar sozinho a cada 60s
 @st.fragment(run_every=60)
@@ -252,8 +260,7 @@ def atualizar_painel():
     ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
     # --- BUSCA AIRCALL ---
-    stats_aircall = get_aircall_stats(ts_inicio) 
-
+    stats_aircall, total_atendidas, total_perdidas = get_aircall_stats(ts_inicio)
     # --- PROCESSAMENTO ---
     online = 0
     tabela = []
@@ -343,11 +350,16 @@ def atualizar_painel():
         st.toast("🔔 Alerta enviado para o Slack!", icon="📨")
 
     # --- VISUALIZAÇÃO ---
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5) # Agora são 5 colunas
+    
     c1.metric("Fila de Espera", len(fila), "Aguardando", delta_color="inverse")
     c2.metric(texto_volume, f"{vol_periodo} / {vol_rec}")
-    c3.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
-    c4.metric("Atualizado", datetime.now(FUSO_BR).strftime("%H:%M:%S"))
+    
+    # Novo Card de Ligações
+    c3.metric("📞 Ligações (Hoje)", f"{total_atendidas}", f"{total_perdidas} perdidas", delta_color="off")
+    
+    c4.metric("Agentes Online", online, f"Meta: {META_AGENTES}")
+    c5.metric("Atualizado", datetime.now(FUSO_BR).strftime("%H:%M:%S"))
 
     if len(fila) > 0:
         st.error("🔥 **CRÍTICO: Clientes aguardando na fila!**")
@@ -460,6 +472,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
