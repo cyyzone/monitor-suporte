@@ -298,7 +298,7 @@ def atualizar_painel():
         alerta = "⚠️" if abertos >= 10 else ""
         raio = "⚡" if volume_recente >= 3 else ""
         
-        if abertos >= 5:
+        if abertos >= 10:
             lista_sobrecarga.append(f"{info['name']} ({abertos})")
             
         if volume_recente >= 3:
@@ -505,6 +505,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
