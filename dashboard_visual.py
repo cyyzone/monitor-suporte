@@ -25,7 +25,15 @@ except KeyError:
     st.error("❌ Erro Crítico: 'INTERCOM_APP_ID' não encontrado no secrets.toml")
     st.stop()
 
-TEAM_ID = 2975006 # ID do time de suporte no Intercom
+# --- CONFIGURAÇÃO MULTI-TIMES ---
+# Substituímos o TEAM_ID único por uma lista e um dicionário de nomes
+TEAMS_IDS = [2975006, 1972225] 
+
+NOMES_TIMES = {
+    2975006: "Customer Success - Atendimento - Distribuição das conversas",
+    1972225: "Customer Success"
+}
+
 META_AGENTES = 4 # Meta mínima de agentes online
 FUSO_BR = timezone(timedelta(hours=-3)) # Fuso horário de Brasília (UTC-3)
 
@@ -220,7 +228,7 @@ def get_aircall_stats(ts_inicio):
                     detalhes_ligacoes[intercom_id].append({
                         'id': call['id'],
                         'started_at': call.get('started_at', 0),
-                        'link': f"https://assets.aircall.io/calls/{call['id']}/recording", # <--- LINK
+                        'link': f"https://assets.aircall.io/calls/{call['id']}/recording", 
                         'number': call.get('raw_digits', 'Desconhecido')
                     })
                             
@@ -264,15 +272,56 @@ def atualizar_painel():
         ts_inicio = int((now - timedelta(hours=48)).timestamp())
         texto_volume = "Volume (48h / 30min)"
 
-    # Buscando dados
-    ids_time = get_team_members(TEAM_ID)
+    # --- BUSCANDO DADOS (MULTI-TIMES) ---
     admins = get_admin_details()
-    fila = get_team_queue_details(TEAM_ID)
-    vol_periodo, vol_rec, stats_periodo, stats_rec, detalhes_agente = get_daily_stats(TEAM_ID, ts_inicio)
-    ultimas = get_latest_conversations(TEAM_ID, ts_inicio, 10)
     
+    # Variáveis Acumuladoras
+    ids_time_set = set()
+    fila = []
+    vol_periodo = 0
+    vol_rec = 0
+    stats_periodo = {}
+    stats_rec = {}
+    detalhes_agente = {}
+    ultimas_temp = []
+
+    # Loop para buscar dados de TODOS os times configurados
+    for t_id in TEAMS_IDS:
+        # 1. Membros
+        ids_time_set.update(get_team_members(t_id))
+        
+        # 2. Fila (Com carimbo de nome)
+        fila_do_time = get_team_queue_details(t_id)
+        nome_do_time = NOMES_TIMES.get(t_id, f"Time {t_id}")
+        
+        for ticket in fila_do_time:
+            ticket['nome_time'] = nome_do_time
+            
+        fila.extend(fila_do_time)
+        
+        # 3. Estatísticas
+        vp, vr, sp, sr, da = get_daily_stats(t_id, ts_inicio)
+        vol_periodo += vp
+        vol_rec += vr
+        
+        # Mesclando dicionários (Somando valores se o agente estiver em 2 times)
+        for aid, val in sp.items(): stats_periodo[aid] = stats_periodo.get(aid, 0) + val
+        for aid, val in sr.items(): stats_rec[aid] = stats_rec.get(aid, 0) + val
+        
+        for aid, lista in da.items():
+            if aid not in detalhes_agente: detalhes_agente[aid] = []
+            detalhes_agente[aid].extend(lista)
+            
+        # 4. Últimas conversas
+        ultimas_temp.extend(get_latest_conversations(t_id, ts_inicio, 10))
+
+    # Finalizando processamento dos dados
+    ids_time = list(ids_time_set)
+    ultimas = sorted(ultimas_temp, key=lambda x: x['created_at'], reverse=True)[:10]
+
     # --- BUSCA AIRCALL ---
     stats_aircall, total_atendidas, total_perdidas, detalhes_calls = get_aircall_stats(ts_inicio)
+    
     # --- PROCESSAMENTO ---
     online = 0
     tabela = []
@@ -308,7 +357,7 @@ def atualizar_painel():
             "Status": emoji,
             "Agente": info['name'],
             "Abertos": f"{abertos} {alerta}",
-            "📞 Aircall": ligacoes, # Nova Coluna
+            "📞 Aircall": ligacoes, 
             "Volume Período": stats_periodo.get(sid, 0),
             "Recente (30m)": f"{volume_recente} {raio}",
             "Pausados": pausados
@@ -378,8 +427,11 @@ def atualizar_painel():
         links_md = ""
         for item in fila:
             c_id = item['id']
+            # Identifico o time para exibir no link
+            t_nome = item.get('nome_time', 'Geral')
+            
             link = f"https://app.intercom.com/a/inbox/{APP_ID}/inbox/conversation/{c_id}"
-            links_md += f"[Abrir Ticket #{c_id}]({link}) &nbsp;&nbsp; "
+            links_md += f"[**{t_nome}** #{c_id}]({link}) &nbsp;&nbsp; "
         st.markdown(links_md, unsafe_allow_html=True)
 
     if online < META_AGENTES:
@@ -415,15 +467,15 @@ def atualizar_painel():
                 nome = admins.get(sid, {}).get('name', 'Desconhecido')
                 tickets = detalhes_agente.get(sid, [])
                 
-                # --- NOVO: PEGA DADOS DAS CHAMADAS ---
+                # --- PEGA DADOS DAS CHAMADAS ---
                 qtd_calls = stats_aircall.get(sid, 0)
                 calls_agente = detalhes_calls.get(sid, []) # Pega a lista de links
                 
                 with cols[i % 3]:
-                    # Atualizei o título para mostrar Tickets (T) e Calls (C)
+                    # Título com Tickets (T) e Calls (C)
                     with st.expander(f"{nome} (T: {len(tickets)} | C: {qtd_calls})"):
                         
-                        # --- 1. LISTA DE TICKETS (Igual antes) ---
+                        # --- 1. LISTA DE TICKETS ---
                         if tickets:
                             st.caption("📨 **Tickets Intercom**")
                             tickets_sorted = sorted(tickets, key=lambda x: x['created_at'], reverse=True)
@@ -431,16 +483,16 @@ def atualizar_painel():
                                 hora = datetime.fromtimestamp(t['created_at'], tz=FUSO_BR).strftime('%H:%M')
                                 st.markdown(f"⏰ {hora} - [Abrir Ticket]({t['link']})")
                         
-                        # --- 2. LISTA DE LIGAÇÕES (NOVO) ---
+                        # --- 2. LISTA DE LIGAÇÕES ---
                         if calls_agente:
-                            if tickets: st.markdown("---") # Divisória se tiver os dois
+                            if tickets: st.markdown("---") 
                             st.caption("📞 **Ligações Aircall**")
                             
                             calls_sorted = sorted(calls_agente, key=lambda x: x['started_at'], reverse=True)
                             
                             for c in calls_sorted:
                                 hora = datetime.fromtimestamp(c['started_at'], tz=FUSO_BR).strftime('%H:%M')
-                                # Link direto para a gravação/detalhes
+                                # Link direto para assets.aircall.io
                                 st.markdown(f"🎧 **{hora}** - [Ouvir Ligação]({c['link']})")
                                 
                         if not tickets and not calls_agente:
@@ -505,14 +557,4 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
-
-
-
-
-
-
-
-
-
-
 
