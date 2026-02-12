@@ -26,7 +26,7 @@ except KeyError:
     st.stop()
 
 # --- CONFIGURAÇÃO MULTI-TIMES ---
-# Substituímos o TEAM_ID único por uma lista e um dicionário de nomes
+# Substituí o TEAM_ID único por uma lista e um dicionário de nomes
 TEAMS_IDS = [2975006, 1972225] 
 
 NOMES_TIMES = {
@@ -557,4 +557,5 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
