@@ -62,7 +62,16 @@ As credenciais não devem constar no código. Cria uma pasta `.streamlit` na rai
 ```toml
 # .streamlit/secrets.toml
 
-INTERCOM_APP_ID = "teu_app_id_aqui"
-INTERCOM_TOKEN = "teu_token_de_acesso_aqui"
-SLACK_WEBHOOK = "teu_url_do_webhook_slack"
-APP_PASSWORD = "tua_senha_de_acesso_ao_dashboard"
+# --- Acesso ao Painel ---
+APP_PASSWORD = "sua_senha_de_acesso"
+
+# --- API Intercom ---
+INTERCOM_APP_ID = "seu_app_id"
+INTERCOM_TOKEN = "seu_token_intercom"
+
+# --- API Aircall (Novo v2.0) ---
+AIRCALL_ID = "seu_api_id_aircall"
+AIRCALL_TOKEN = "seu_api_token_aircall"
+
+# --- Notificações ---
+SLACK_WEBHOOK = "sua_url_do_webhook_slack"
