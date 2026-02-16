@@ -1,46 +1,59 @@
-# Monitor de Suporte Intercom 📊
+# 🚀 Monitor Operacional Unificado (Intercom + Aircall)
 
-Este projeto reúne dashboards desenvolvidos em **Python** e **Streamlit** para monitorizar a operação de suporte no Intercom. A aplicação divide-se em três módulos principais: monitorização operacional em tempo real, controlo de tickets sem atribuição ("limbo") e análise de qualidade (CSAT).
+> **Status:** Versão 2.0 (Em Produção)  
+> **Responsável:** Jenyffer Caetano de Souza
 
-## 🚀 Módulos do Projeto
+## 📌 Sobre o Projeto
+Este é um ecossistema de monitoramento em tempo real desenvolvido em **Python (Streamlit)** para centralizar a gestão da operação de suporte. 
 
-O sistema é composto por três painéis distintos:
+O objetivo principal é eliminar a "cegueira operacional" e a necessidade de alternar entre múltiplas ferramentas (Intercom, Aircall, Slack), oferecendo uma visão única de **Texto (Tickets)** e **Voz (Telefonia)**.
 
-### 1. Monitor Operacional (`dashboard_visual.py`)
-Focado na gestão da equipa em tempo real.
-* **Status dos Agentes:** Visualiza quem está Online ou Ausente (Away), com base no status do Intercom.
-* **Alertas de Sobrecarga:** Sinaliza agentes com 5 ou mais tickets abertos.
-* **Alta Demanda:** Identifica agentes que receberam 3 ou mais tickets nos últimos 30 minutos.
-* **Fila de Espera:** Monitoriza tickets na fila e alerta sobre clientes a aguardar.
-* **Integração com Slack:** Envia notificações automáticas em caso de anomalias.
+O sistema atualiza automaticamente a cada 60 segundos e envia alertas proativos para a liderança.
 
-### 2. Monitor Limbo (`monitor_limbo.py`)
-Garante que nenhum cliente fica esquecido.
-* **Deteção de "Limbo":** Lista conversas abertas sem qualquer atribuição (nem agente, nem equipa).
-* **Cálculo de Espera:** Exibe o tempo de espera com conversão para o fuso horário local.
-* **Alertas:** Notifica via Slack sobre conversas perdidas.
+---
 
-### 3. Painel de Qualidade - CSAT (`dashboard_csat.py`)
-Para análise de métricas de satisfação.
-* **Filtro por Período:** Seleção de datas personalizadas.
-* **Métricas de CSAT:** Calcula o **CSAT Real** (todas as avaliações) e o **CSAT Ajustado** (ignora neutras).
-* **Detalhamento:** Tabela de desempenho individual e lista de comentários.
+## 🔥 Principais Funcionalidades
 
-## 🛠️ Instalação e Requisitos
+### 1. Painel Operacional (`dashboard_visual.py`)
+* **Monitoramento Multi-Times:** Vigia as filas de espera de múltiplos departamentos (ex: Suporte, Financeiro) simultaneamente.
+* **Integração de Voz (Aircall):** Cruza o e-mail do agente para contabilizar ligações atendidas/perdidas e disponibiliza o **link direto para ouvir a gravação** da chamada.
+* **Visão de Produtividade:** Tabela unificada mostrando Tickets Abertos vs. Ligações Atendidas por agente.
+* **Status em Tempo Real:** Indica quem está Online ou Ausente (Away).
 
-Este projeto utiliza **Python** e requer as bibliotecas listadas em `requirements.txt`.
+### 2. Painel de Qualidade (`dashboard_csat.py`)
+* Análise histórica de CSAT (Customer Satisfaction Score).
+* Filtros por data e por agente para feedback individual.
 
-1.  **Clonar o repositório:**
-    ```bash
-    git clone https://teu-repositorio/monitor-suporte.git
-    cd monitor-suporte
-    ```
+### 3. Sistema de Alertas (Slack)
+Um "robô vigia" que notifica no Slack quando:
+* 🔥 Existe fila de espera (com link direto para o ticket e nome do time).
+* ⚠️ Um agente está sobrecarregado (10+ tickets abertos).
+* ⚡ Há um pico de demanda (3+ tickets em 30 minutos).
+* 📉 A equipe online está abaixo da meta mínima.
 
-2.  **Instalar dependências:**
-    Recomenda-se o uso de um ambiente virtual (venv).
-    ```bash
-    pip install -r requirements.txt
-    ```
+---
+
+## 🛠️ Stack Tecnológica
+
+* **Linguagem:** Python 3.11+
+* **Frontend:** Streamlit
+* **APIs:** Intercom API (v2.9), Aircall API (v1)
+* **Notificações:** Slack Webhooks
+* **Manipulação de Dados:** Pandas
+
+---
+
+## ⚙️ Instalação e Configuração
+
+### 1. Pré-requisitos
+Certifique-se de ter o Python instalado. Clone o repositório e instale as dependências:
+
+```bash
+git clone [https://github.com/seu-usuario/monitor-suporte.git](https://github.com/seu-usuario/monitor-suporte.git)
+cd monitor-suporte
+pip install -r requirements.txt
+
+
 
 ## 🔐 Configuração (Secrets)
 
