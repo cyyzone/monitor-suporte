@@ -1,7 +1,7 @@
 # 🚀 Monitor Operacional Unificado (Intercom + Aircall)
 
 > **Status:** Versão 2.0 (Em Produção)  
-> **Responsável:** Jenyffer Caetano de Souza
+> **Responsável:** Jeny
 
 ## 📌 Sobre o Projeto
 Este é um ecossistema de monitoramento em tempo real desenvolvido em **Python (Streamlit)** para centralizar a gestão da operação de suporte. 
