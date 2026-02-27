@@ -157,29 +157,37 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
 st.markdown("---")
 st.subheader("🗓️ 1. Configurar Escala")
 
-# Removido o campo manual de meta
 c_filtro, _ = st.columns([1, 2])
 with c_filtro:
     datas = st.date_input("📅 Período de Análise", [datetime.today() - timedelta(days=7), datetime.today()])
 
 st.caption("Preencha a escala abaixo com os primeiros nomes dos analistas (Ex: Aline, Heloisa). Use vírgula ou 'e' para separar os nomes. **Adicione ou remova linhas usando o ícone '+' na tabela.**")
 
+# Deixei os dias da semana limpos como padrão
 if "escala_df" not in st.session_state:
     st.session_state["escala_df"] = pd.DataFrame({
-        "Dia": ["Segunda (Ex: 01/03)", "Terça (Ex: 02/03)", "Quarta", "Quinta", "Sexta"],
+        "Dia": ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"],
         "Manhã ☎️": ["", "", "", "", ""],
         "Tarde ☎️": ["", "", "", "", ""]
     })
 
+# Transformamos a coluna "Dia" num menu suspenso com as opções prontas
 escala_editada = st.data_editor(
     st.session_state["escala_df"], 
     use_container_width=True, 
     hide_index=True,
-    num_rows="dynamic" 
+    num_rows="dynamic",
+    column_config={
+        "Dia": st.column_config.SelectboxColumn(
+            "Dia da Semana",
+            help="Selecione o dia",
+            options=["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"],
+            required=True
+        )
+    }
 )
 
 gerar_relatorio = st.button("🚀 Buscar Histórico e Calcular Produtividade", type="primary", use_container_width=True)
-
 st.markdown("---")
 
 if 'dados_busca' not in st.session_state:
