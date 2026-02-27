@@ -1,18 +1,30 @@
 import streamlit as st
 import pandas as pd
-import time
+import requests
+from requests.auth import HTTPBasicAuth
 from datetime import datetime, timedelta
 from utils import check_password, make_api_request
 
-st.set_page_config(page_title="Relatório Produtividade", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Relatório de Telefonia", page_icon="📞", layout="wide")
 
 if not check_password():
     st.stop()
 
-st.title("📊 Relatório de Produtividade da Equipe")
-st.markdown("Selecione o período para contabilizar os tickets trabalhados por cada agente.")
+st.title("📞 Relatório de Telefonia da Equipe")
+st.markdown("Selecione o período para contabilizar as ligações atendidas por cada agente.")
 
-# --- Dicionários e Buscas Básicas ---
+# --- MAPEAMENTO AIRCALL (Email -> ID Intercom para pegar o nome visual) ---
+AGENTS_MAP = {
+    "rhayslla.junca@produttivo.com.br": "5281911",
+    "douglas.david@produttivo.com.br": "5586698",
+    "aline.souza@produttivo.com.br": "5717251",
+    "heloisa.atm.slv@produttivo.com.br": "7455039",
+    "danielle.ghesini@produttivo.com.br": "7628368",
+    "jenyffer.souza@produttivo.com.br": "8115775",
+    "marcelo.misugi@produttivo.com.br": "8126602"
+}
+
+# --- Busca de Nomes ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_admin_details():
     url = "https://api.intercom.io/admins" 
@@ -23,38 +35,71 @@ def get_admin_details():
             dados[str(admin['id'])] = admin['name']
     return dados
 
-# --- Função de Busca do Relatório ---
-def buscar_dados_produtividade(ts_inicio, ts_fim):
-    url = "https://api.intercom.io/conversations/search"
-    payload = {
-        "query": {
-            "operator": "AND",
-            "value": [
-                {"field": "updated_at", "operator": ">", "value": ts_inicio},
-                {"field": "updated_at", "operator": "<", "value": ts_fim}
-            ]
-        },
-        "pagination": {"per_page": 100}
+# --- Função de Busca Aircall ---
+def buscar_dados_aircall(ts_inicio, ts_fim):
+    if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
+        st.error("Credenciais do Aircall não configuradas nos secrets.")
+        return {}, 0
+        
+    url = "https://api.aircall.io/v1/calls"
+    auth = HTTPBasicAuth(st.secrets["AIRCALL_ID"], st.secrets["AIRCALL_TOKEN"])
+    
+    params = {
+        "from": ts_inicio,
+        "to": ts_fim,
+        "order": "desc",
+        "per_page": 50,
+        "direction": "inbound" 
     }
     
-    todas_conversas = []
+    ligacoes_por_agente = {}
+    total_ligacoes = 0
+    page = 1
     
-    # Loop de paginação para buscar todo o histórico do período
     while True:
-        data = make_api_request("POST", url, json=payload)
-        if not data:
+        params['page'] = page
+        try:
+            response = requests.get(url, auth=auth, params=params)
+            if response.status_code != 200: break
+                
+            data = response.json()
+            calls = data.get('calls', [])
+            if not calls: break
+                
+            for call in calls:
+                emails_envolvidos = set()
+                
+                # Identifica quem atendeu ou recebeu transferência
+                for campo in ['user', 'transferred_by', 'transferred_to']:
+                    obj = call.get(campo)
+                    if obj and isinstance(obj, dict) and obj.get('email'):
+                        emails_envolvidos.add(obj.get('email').lower())
+                        
+                for u in call.get('users', []):
+                    if isinstance(u, dict) and u.get('email'):
+                        emails_envolvidos.add(u['email'].lower())
+                
+                # Mantém apenas os emails da equipe mapeada
+                emails_da_equipa = [e for e in emails_envolvidos if e in AGENTS_MAP]
+                
+                if not emails_da_equipa: continue 
+
+                status = call.get('status')
+                if status == 'done':
+                    total_ligacoes += 1
+                    for email in emails_da_equipa:
+                        intercom_id = AGENTS_MAP[email]
+                        ligacoes_por_agente[intercom_id] = ligacoes_por_agente.get(intercom_id, 0) + 1
+                        
+            if data.get('meta', {}).get('next_page_link'):
+                page += 1
+            else:
+                break
+        except Exception as e:
+            print(f"Erro Aircall: {e}")
             break
             
-        conversas = data.get('conversations', [])
-        todas_conversas.extend(conversas)
-        
-        paginacao = data.get('pages', {})
-        if paginacao.get('next'):
-            payload['pagination']['starting_after'] = paginacao['next']['starting_after']
-        else:
-            break
-            
-    return todas_conversas
+    return ligacoes_por_agente, total_ligacoes
 
 # --- Filtros de Data na Tela ---
 col1, col2, col3 = st.columns([1, 1, 2])
@@ -69,60 +114,40 @@ with col3:
 
 st.markdown("---")
 
-# --- Processamento dos Dados ---
+# --- Processamento e Exibição ---
 if gerar_relatorio:
-    # Ajusta os horários para pegar o dia completo (00:00 até 23:59)
+    # Formata para pegar do primeiro minuto do dia inicial ao último minuto do dia final
     ts_start = int(datetime.combine(data_inicio, datetime.min.time()).timestamp())
     ts_end = int(datetime.combine(data_fim, datetime.max.time()).timestamp())
     
-    with st.spinner("Buscando histórico na API do Intercom. Isso pode levar alguns segundos..."):
-        conversas_periodo = buscar_dados_produtividade(ts_start, ts_end)
+    with st.spinner("Buscando histórico de Ligações na API do Aircall..."):
+        
+        ligacoes_aircall, total_lig = buscar_dados_aircall(ts_start, ts_end)
         admins = get_admin_details()
         
-        stats_agentes = {}
+        stats_agentes = []
         
-        for conv in conversas_periodo:
-            estado = conv.get('state')
-            dono_final = str(conv.get('admin_assignee_id')) if conv.get('admin_assignee_id') else "FILA"
-            
-            # Pega a lista de todos os agentes que enviaram alguma mensagem neste ticket
-            teammates_ativos = conv.get('teammates', {}).get('admins', [])
-            ids_envolvidos = [str(t.get('id')) for t in teammates_ativos]
-            
-            for adm_id in ids_envolvidos:
-                if adm_id not in stats_agentes:
-                    stats_agentes[adm_id] = {
-                        "Agente": admins.get(adm_id, f"ID {adm_id}"),
-                        "Recebeu / Atuou": 0,
-                        "Resolveu": 0,
-                        "Transferiu": 0
-                    }
-                
-                # Regra 1: Se o ID dele está nos envolvidos, ele atuou no ticket
-                stats_agentes[adm_id]["Recebeu / Atuou"] += 1
-                
-                # Regra 2: Se o ticket está fechado e ele é o dono final, ele resolveu
-                if estado == 'closed' and dono_final == adm_id:
-                    stats_agentes[adm_id]["Resolveu"] += 1
-                
-                # Regra 3: Se ele atuou, mas o dono final é outra pessoa (ou a fila), ele transferiu
-                elif dono_final != adm_id:
-                    stats_agentes[adm_id]["Transferiu"] += 1
+        # Iteramos pelo mapa inteiro para garantir que todos apareçam na tabela,
+        # mesmo quem teve 0 ligações no período.
+        for email, adm_id in AGENTS_MAP.items():
+            qtd = ligacoes_aircall.get(adm_id, 0)
+            stats_agentes.append({
+                "Agente": admins.get(adm_id, f"ID {adm_id}"),
+                "📞 Ligações (Atendidas)": qtd
+            })
 
-        # Transforma os dados em uma tabela para visualização
         if stats_agentes:
-            df = pd.DataFrame(list(stats_agentes.values()))
+            df = pd.DataFrame(stats_agentes)
             
-            # Exibe os totais gerais no topo
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total de Tickets Trabalhados", len(conversas_periodo))
-            c2.metric("Total de Resoluções", df["Resolveu"].sum())
-            c3.metric("Total de Transferências", df["Transferiu"].sum())
+            # Exibe os totais gerais
+            c1, c2 = st.columns(2)
+            c1.metric("Total de Ligações da Equipe", total_lig)
+            c2.metric("Período Analisado", f"{data_inicio.strftime('%d/%m')} até {data_fim.strftime('%d/%m')}")
             
-            st.markdown("### 👥 Detalhamento por Agente")
+            st.markdown("### 👥 Produtividade por Agente")
             
-            # Ordena por quem resolveu mais tickets
-            df = df.sort_values(by="Resolveu", ascending=False)
+            # Ordena do maior para o menor volume de ligações
+            df = df.sort_values(by="📞 Ligações (Atendidas)", ascending=False)
             
             st.dataframe(
                 df,
@@ -131,4 +156,4 @@ if gerar_relatorio:
             )
             
         else:
-            st.warning("Nenhuma atividade encontrada neste período.")
+            st.warning("Nenhuma ligação encontrada para o time neste período.")
