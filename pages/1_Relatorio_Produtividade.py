@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime, timezone, timedelta
+import unicodedata # Biblioteca NATIVA do Python (não precisa instalar)
 from utils import check_password, make_api_request
 
 st.set_page_config(page_title="Relatório de Telefonia", page_icon="📞", layout="wide")
@@ -10,13 +11,13 @@ st.set_page_config(page_title="Relatório de Telefonia", page_icon="📞", layou
 if not check_password():
     st.stop()
 
-st.title("📞 Relatório de Telefonia da Equipe")
-st.markdown("Acompanhe o volume de ligações (Inbound/Outbound), tempo de conversação e transferências.")
+st.title("📞 Relatório de Telefonia e Metas")
+st.markdown("Preencha a escala da semana, acompanhe o volume de ligações e veja quem bateu a meta.")
 
 # Fuso horário de Brasília
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- MAPEAMENTO AIRCALL (Email -> ID Intercom para pegar o nome visual) ---
+# --- MAPEAMENTO AIRCALL ---
 AGENTS_MAP = {
     "rhayslla.junca@produttivo.com.br": "5281911",
     "douglas.david@produttivo.com.br": "5586698",
@@ -27,21 +28,16 @@ AGENTS_MAP = {
     "marcelo.misugi@produttivo.com.br": "8126602"
 }
 
-# --- Função Auxiliar: Formatar Segundos ---
 def formatar_segundos(segundos):
-    """Transforma segundos em HH:MM:SS ou MM:SS"""
     if pd.isna(segundos) or segundos == 0:
         return "00:00"
-    
     segundos = int(segundos)
     m, s = divmod(segundos, 60)
     h, m = divmod(m, 60)
-    
     if h > 0:
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
-# --- Busca de Nomes ---
 @st.cache_data(ttl=300, show_spinner=False)
 def get_admin_details():
     url = "https://api.intercom.io/admins" 
@@ -52,7 +48,7 @@ def get_admin_details():
             dados[str(admin['id'])] = admin['name']
     return dados
 
-# --- Função de Busca Aircall Detalhada ---
+@st.cache_data(ttl=300, show_spinner=False)
 def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
         st.error("Credenciais do Aircall não configuradas nos secrets.")
@@ -68,15 +64,10 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
         "per_page": 50
     }
     
-    # Estrutura preparada para receber tempo e direções separadas
     stats_por_id = {
         adm_id: {
-            "inbound": 0, 
-            "outbound": 0, 
-            "transferidas": 0, 
-            "duracao_total": 0, 
-            "destinos": [], 
-            "detalhes": []
+            "inbound": 0, "outbound": 0, "transferidas": 0, 
+            "duracao_total": 0, "destinos": [], "detalhes": []
         } 
         for adm_id in AGENTS_MAP.values()
     }
@@ -95,8 +86,7 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                 
             for call in calls:
                 status = call.get('status')
-                if status != 'done':
-                    continue 
+                if status != 'done': continue 
                     
                 user = call.get('user', {})
                 user_email = user.get('email', '').lower() if user else ""
@@ -107,29 +97,23 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                 transferred_to = call.get('transferred_to', {})
                 destino = "Desconhecido"
                 if transferred_to:
-                    if transferred_to.get('name'):
-                        destino = transferred_to.get('name')
-                    elif transferred_to.get('email'):
-                        destino = transferred_to.get('email').split('@')[0]
-                    elif transferred_to.get('number'):
-                        destino = transferred_to.get('number')
+                    if transferred_to.get('name'): destino = transferred_to.get('name')
+                    elif transferred_to.get('email'): destino = transferred_to.get('email').split('@')[0]
+                    elif transferred_to.get('number'): destino = transferred_to.get('number')
                 
-                # Coleta Direção, Duração e o Número de Telefone
                 direcao = call.get('direction', 'inbound') 
                 duracao = call.get('duration', 0)
-                numero_telefone = call.get('raw_digits', 'Desconhecido') # Pega o número do cliente
-                
+                numero_telefone = call.get('raw_digits', 'Desconhecido')
                 link_gravacao = f"https://assets.aircall.io/calls/{call['id']}/recording"
                 ts_ligacao = call.get('started_at', 0)
                 
-                # Regra A: Se alguém do nosso time TRANSFERIU a ligação
                 if transf_by_email in AGENTS_MAP:
                     adm_id = AGENTS_MAP[transf_by_email]
                     stats_por_id[adm_id]["transferidas"] += 1
                     stats_por_id[adm_id]["destinos"].append(destino)
                     stats_por_id[adm_id]["detalhes"].append({
                         "Data_Timestamp": ts_ligacao, 
-                        "Telefone": numero_telefone, # <-- Inserido aqui
+                        "Telefone": numero_telefone,
                         "Ação": "🔄 Transferiu",
                         "Direção": "Entrada (In)" if direcao == 'inbound' else "Saída (Out)",
                         "Duração": formatar_segundos(duracao),
@@ -137,24 +121,20 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                         "Link": link_gravacao
                     })
                 
-                # Regra B: Se alguém do nosso time é o dono final (atendeu ou realizou)
                 if user_email in AGENTS_MAP:
                     adm_id = AGENTS_MAP[user_email]
-                    
                     stats_por_id[adm_id]["duracao_total"] += duracao
                     
                     if direcao == 'inbound':
                         stats_por_id[adm_id]["inbound"] += 1
-                        acao_str = "📥 Recebeu"
-                        dir_str = "Entrada (In)"
+                        acao_str, dir_str = "📥 Recebeu", "Entrada (In)"
                     else:
                         stats_por_id[adm_id]["outbound"] += 1
-                        acao_str = "📤 Ligou"
-                        dir_str = "Saída (Out)"
+                        acao_str, dir_str = "📤 Ligou", "Saída (Out)"
 
                     stats_por_id[adm_id]["detalhes"].append({
                         "Data_Timestamp": ts_ligacao, 
-                        "Telefone": numero_telefone, # <-- Inserido aqui
+                        "Telefone": numero_telefone,
                         "Ação": acao_str,
                         "Direção": dir_str,
                         "Duração": formatar_segundos(duracao),
@@ -162,135 +142,162 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                         "Link": link_gravacao
                     })
 
-            if data.get('meta', {}).get('next_page_link'):
-                page += 1
-            else:
-                break
+            if data.get('meta', {}).get('next_page_link'): page += 1
+            else: break
         except Exception as e:
             print(f"Erro Aircall: {e}")
             break
             
     return stats_por_id
 
-# --- Filtros de Data na Tela ---
-col1, col2, col3 = st.columns([1, 1, 2])
-with col1:
-    data_inicio = st.date_input("Data de Início", datetime.today() - timedelta(days=7))
-with col2:
-    data_fim = st.date_input("Data Final", datetime.today())
-with col3:
-    st.write("")
-    st.write("")
-    gerar_relatorio = st.button("Gerar Relatório", type="primary")
+
+# =====================================================================
+# 1. ÁREA DE CONFIGURAÇÃO (ESCALA E METAS)
+# =====================================================================
+st.markdown("---")
+st.subheader("🗓️ 1. Configurar Escala e Metas")
+
+c_meta, c_filtro, _ = st.columns([1, 1, 2])
+with c_meta:
+    meta_por_turno = st.number_input("🎯 Meta de ligações por Turno", min_value=1, value=15)
+with c_filtro:
+    datas = st.date_input("📅 Período de Análise", [datetime.today() - timedelta(days=7), datetime.today()])
+
+st.caption("Preencha a escala abaixo com os primeiros nomes dos analistas (Ex: Aline, Heloisa). Use vírgula ou 'e' para separar os nomes.")
+
+# Cria a tabela base da escala (vazia para preenchimento)
+if "escala_df" not in st.session_state:
+    st.session_state["escala_df"] = pd.DataFrame({
+        "Dia": ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"],
+        "Manhã ☎️": ["", "", "", "", ""],
+        "Tarde ☎️": ["", "", "", "", ""]
+    })
+
+# Exibe o grid interativo
+escala_editada = st.data_editor(st.session_state["escala_df"], use_container_width=True, hide_index=True)
+
+# Botão principal de ação
+gerar_relatorio = st.button("🚀 Buscar Histórico e Calcular Metas", type="primary", use_container_width=True)
 
 st.markdown("---")
 
-# --- Processamento e Exibição ---
+if 'dados_busca' not in st.session_state:
+    st.session_state['dados_busca'] = None
+
 if gerar_relatorio:
-    ts_start = int(datetime.combine(data_inicio, datetime.min.time()).timestamp())
-    ts_end = int(datetime.combine(data_fim, datetime.max.time()).timestamp())
+    # Trava de segurança: Verifica se o usuário selecionou Início e Fim
+    if len(datas) < 2:
+        st.error("⚠️ Atenção: Por favor, selecione a data de INÍCIO e a data de FIM no calendário acima.")
+    else:
+        ts_start = int(datetime.combine(datas[0], datetime.min.time()).timestamp())
+        ts_end = int(datetime.combine(datas[1], datetime.max.time()).timestamp())
+        
+        with st.spinner("Buscando histórico e analisando métricas..."):
+            stats_aircall = buscar_dados_aircall_detalhados(ts_start, ts_end)
+            admins = get_admin_details()
+            st.session_state['dados_busca'] = (stats_aircall, admins, escala_editada)
+
+
+# =====================================================================
+# 2. ÁREA DE RESULTADOS (PROCESSAMENTO)
+# =====================================================================
+if st.session_state['dados_busca']:
+    stats_aircall, admins, escala = st.session_state['dados_busca']
     
-    with st.spinner("Buscando histórico, durações e analisando direções..."):
+    # 2.1 LÓGICA DE LEITURA DA ESCALA
+    turnos_calculados = {adm_id: 0 for adm_id in AGENTS_MAP.values()}
+    
+    def limpar_texto(texto):
+        # Remove acentos com a biblioteca nativa do Python (unicodedata)
+        texto_str = str(texto)
+        texto_sem_acento = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
+        return texto_sem_acento.lower().replace(" e ", ",").split(",")
+
+    # Varre a tabela de escala preenchida
+    for _, row in escala.iterrows():
+        nomes_turno = limpar_texto(row["Manhã ☎️"]) + limpar_texto(row["Tarde ☎️"])
         
-        stats_aircall = buscar_dados_aircall_detalhados(ts_start, ts_end)
-        admins = get_admin_details()
+        for nome_digitado in nomes_turno:
+            nome_digitado = nome_digitado.strip()
+            if not nome_digitado: continue
+            
+            for adm_id in AGENTS_MAP.values():
+                nome_oficial = admins.get(adm_id, "").lower()
+                nome_oficial_sem_acento = ''.join(c for c in unicodedata.normalize('NFD', nome_oficial) if unicodedata.category(c) != 'Mn')
+                
+                if nome_digitado in nome_oficial_sem_acento:
+                    turnos_calculados[adm_id] += 1
+                    break 
+    
+    # 2.2 PREPARAÇÃO DOS DADOS FINAIS
+    tabela_dados = []
+    
+    for adm_id, stats in stats_aircall.items():
+        nome = admins.get(adm_id, f"ID {adm_id}")
+        inb = stats["inbound"]
+        outb = stats["outbound"]
+        total_atendidas = inb + outb
+        turnos_agente = turnos_calculados[adm_id]
         
-        tabela_dados = []
+        media = (total_atendidas / turnos_agente) if turnos_agente > 0 else 0
+        bateu_meta = "✅ Sim" if (media >= meta_por_turno and turnos_agente > 0) else ("❌ Não" if turnos_agente > 0 else "-")
+            
+        tabela_dados.append({
+            "Agente": nome,
+            "Turnos Escalados": turnos_agente,
+            "Total Ligações": total_atendidas,
+            "Média Alcançada (por turno)": f"{media:.1f}",
+            "Bateu a Meta?": bateu_meta,
+            "📥 Inbound": inb,
+            "📤 Outbound": outb,
+            "🔄 Transferidas": stats["transferidas"]
+        })
+
+    if tabela_dados:
+        df_resultado = pd.DataFrame(tabela_dados)
         
-        geral_inbound = 0
-        geral_outbound = 0
-        geral_transferidas = 0
-        geral_duracao = 0
+        st.subheader("🏆 Resultado de Produtividade vs Escala")
+        
+        st.dataframe(
+            df_resultado.sort_values(by="Total Ligações", ascending=False),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # 2.3 EXIBIÇÃO DOS DETALHES POR AGENTE
+        st.markdown("---")
+        st.subheader("🔎 Detalhamento de Ligações por Agente")
         
         for adm_id, stats in stats_aircall.items():
-            nome = admins.get(adm_id, f"ID {adm_id}")
+            total_interacoes = stats["inbound"] + stats["outbound"] + stats["transferidas"]
             
-            destinos_lista = stats["destinos"]
-            destinos_formatados = "-"
-            
-            if destinos_lista:
-                contagem_destinos = pd.Series(destinos_lista).value_counts()
-                textos = [f"{dest} ({qtd}x)" for dest, qtd in contagem_destinos.items()]
-                destinos_formatados = ", ".join(textos)
-            
-            inb = stats["inbound"]
-            outb = stats["outbound"]
-            transf = stats["transferidas"]
-            duracao_total_agente = stats["duracao_total"]
-            
-            total_atendidas = inb + outb
-            
-            if total_atendidas > 0:
-                tempo_medio = duracao_total_agente / total_atendidas
-            else:
-                tempo_medio = 0
-            
-            geral_inbound += inb
-            geral_outbound += outb
-            geral_transferidas += transf
-            geral_duracao += duracao_total_agente
+            if total_interacoes > 0:
+                nome = admins.get(adm_id, f"ID {adm_id}")
                 
-            tabela_dados.append({
-                "Agente": nome,
-                "📥 Inbound": inb,
-                "📤 Outbound": outb,
-                "🔄 Transferidas": transf,
-                "⏱️ Tempo Total": formatar_segundos(duracao_total_agente),
-                "⏳ Tempo Médio": formatar_segundos(tempo_medio),
-                "🎯 Transferiu para": destinos_formatados
-            })
-
-        if tabela_dados:
-            df_geral = pd.DataFrame(tabela_dados)
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Inbound (Recebidas)", geral_inbound)
-            c2.metric("Total Outbound (Feitas)", geral_outbound)
-            c3.metric("Tempo Total em Linha", formatar_segundos(geral_duracao))
-            
-            geral_total_ligacoes = geral_inbound + geral_outbound
-            geral_media = geral_duracao / geral_total_ligacoes if geral_total_ligacoes > 0 else 0
-            c4.metric("Tempo Médio da Equipe", formatar_segundos(geral_media))
-            
-            st.markdown("### 👥 Produtividade por Agente")
-            df_geral = df_geral.sort_values(by=["📥 Inbound", "📤 Outbound"], ascending=[False, False])
-            st.dataframe(df_geral, use_container_width=True, hide_index=True)
-            
-            st.markdown("---")
-            st.subheader("🔎 Detalhamento de Ligações por Agente")
-            
-            for adm_id, stats in stats_aircall.items():
-                total_interacoes = stats["inbound"] + stats["outbound"] + stats["transferidas"]
-                
-                if total_interacoes > 0:
-                    nome = admins.get(adm_id, f"ID {adm_id}")
+                with st.expander(f"👤 {nome} (Total: {total_interacoes} interações)"):
+                    detalhes = stats["detalhes"]
                     
-                    with st.expander(f"👤 {nome} (Total: {total_interacoes} interações)"):
-                        detalhes = stats["detalhes"]
-                        
-                        for d in detalhes:
-                            if d["Data_Timestamp"] > 0:
-                                dt_obj = datetime.fromtimestamp(d["Data_Timestamp"], tz=FUSO_BR)
-                                d["Data/Hora"] = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
-                            else:
-                                d["Data/Hora"] = "Desconhecido"
-                        
-                        df_detalhes = pd.DataFrame(detalhes)
-                        df_detalhes = df_detalhes.sort_values(by="Data_Timestamp", ascending=False)
-                        
-                        df_detalhes = df_detalhes.drop(columns=["Data_Timestamp"])
-                        
-                        # Adicionamos a coluna "Telefone" na visualização final
-                        df_detalhes = df_detalhes[["Data/Hora", "Telefone", "Ação", "Direção", "Duração", "Destino", "Link"]]
-                        
-                        st.dataframe(
-                            df_detalhes,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Link": st.column_config.LinkColumn("Gravação", display_text="Ouvir Ligação")
-                            }
-                        )
-            
-        else:
-            st.warning("Nenhuma ligação encontrada para o time neste período.")
+                    for d in detalhes:
+                        if d["Data_Timestamp"] > 0:
+                            dt_obj = datetime.fromtimestamp(d["Data_Timestamp"], tz=FUSO_BR)
+                            d["Data/Hora"] = dt_obj.strftime('%d/%m/%Y %H:%M:%S')
+                        else:
+                            d["Data/Hora"] = "Desconhecido"
+                    
+                    df_detalhes = pd.DataFrame(detalhes)
+                    df_detalhes = df_detalhes.sort_values(by="Data_Timestamp", ascending=False)
+                    df_detalhes = df_detalhes.drop(columns=["Data_Timestamp"])
+                    
+                    df_detalhes = df_detalhes[["Data/Hora", "Telefone", "Ação", "Direção", "Duração", "Destino", "Link"]]
+                    
+                    st.dataframe(
+                        df_detalhes,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Link": st.column_config.LinkColumn("Gravação", display_text="Ouvir Ligação")
+                        }
+                    )
+        
+    else:
+        st.warning("Nenhuma ligação encontrada para o time neste período.")
