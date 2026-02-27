@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime, timezone, timedelta
-import unicodedata # Biblioteca NATIVA do Python (não precisa instalar)
+import unicodedata 
 from utils import check_password, make_api_request
 
 st.set_page_config(page_title="Relatório de Telefonia", page_icon="📞", layout="wide")
@@ -11,8 +11,8 @@ st.set_page_config(page_title="Relatório de Telefonia", page_icon="📞", layou
 if not check_password():
     st.stop()
 
-st.title("📞 Relatório de Telefonia e Metas")
-st.markdown("Preencha a escala da semana, acompanhe o volume de ligações e veja quem bateu a meta.")
+st.title("📞 Relatório de Telefonia e Produtividade")
+st.markdown("Preencha a escala para descobrir a meta dinâmica baseada no volume real de ligações.")
 
 # Fuso horário de Brasília
 FUSO_BR = timezone(timedelta(hours=-3))
@@ -152,32 +152,33 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
 
 
 # =====================================================================
-# 1. ÁREA DE CONFIGURAÇÃO (ESCALA E METAS)
+# 1. ÁREA DE CONFIGURAÇÃO (ESCALA)
 # =====================================================================
 st.markdown("---")
-st.subheader("🗓️ 1. Configurar Escala e Metas")
+st.subheader("🗓️ 1. Configurar Escala")
 
-c_meta, c_filtro, _ = st.columns([1, 1, 2])
-with c_meta:
-    meta_por_turno = st.number_input("🎯 Meta de ligações por Turno", min_value=1, value=15)
+# Removido o campo manual de meta
+c_filtro, _ = st.columns([1, 2])
 with c_filtro:
     datas = st.date_input("📅 Período de Análise", [datetime.today() - timedelta(days=7), datetime.today()])
 
-st.caption("Preencha a escala abaixo com os primeiros nomes dos analistas (Ex: Aline, Heloisa). Use vírgula ou 'e' para separar os nomes.")
+st.caption("Preencha a escala abaixo com os primeiros nomes dos analistas (Ex: Aline, Heloisa). Use vírgula ou 'e' para separar os nomes. **Adicione ou remova linhas usando o ícone '+' na tabela.**")
 
-# Cria a tabela base da escala (vazia para preenchimento)
 if "escala_df" not in st.session_state:
     st.session_state["escala_df"] = pd.DataFrame({
-        "Dia": ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"],
+        "Dia": ["Segunda (Ex: 01/03)", "Terça (Ex: 02/03)", "Quarta", "Quinta", "Sexta"],
         "Manhã ☎️": ["", "", "", "", ""],
         "Tarde ☎️": ["", "", "", "", ""]
     })
 
-# Exibe o grid interativo
-escala_editada = st.data_editor(st.session_state["escala_df"], use_container_width=True, hide_index=True)
+escala_editada = st.data_editor(
+    st.session_state["escala_df"], 
+    use_container_width=True, 
+    hide_index=True,
+    num_rows="dynamic" 
+)
 
-# Botão principal de ação
-gerar_relatorio = st.button("🚀 Buscar Histórico e Calcular Metas", type="primary", use_container_width=True)
+gerar_relatorio = st.button("🚀 Buscar Histórico e Calcular Produtividade", type="primary", use_container_width=True)
 
 st.markdown("---")
 
@@ -185,7 +186,6 @@ if 'dados_busca' not in st.session_state:
     st.session_state['dados_busca'] = None
 
 if gerar_relatorio:
-    # Trava de segurança: Verifica se o usuário selecionou Início e Fim
     if len(datas) < 2:
         st.error("⚠️ Atenção: Por favor, selecione a data de INÍCIO e a data de FIM no calendário acima.")
     else:
@@ -208,14 +208,12 @@ if st.session_state['dados_busca']:
     turnos_calculados = {adm_id: 0 for adm_id in AGENTS_MAP.values()}
     
     def limpar_texto(texto):
-        # Remove acentos com a biblioteca nativa do Python (unicodedata)
         texto_str = str(texto)
         texto_sem_acento = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
         return texto_sem_acento.lower().replace(" e ", ",").split(",")
 
-    # Varre a tabela de escala preenchida
     for _, row in escala.iterrows():
-        nomes_turno = limpar_texto(row["Manhã ☎️"]) + limpar_texto(row["Tarde ☎️"])
+        nomes_turno = limpar_texto(row.get("Manhã ☎️", "")) + limpar_texto(row.get("Tarde ☎️", ""))
         
         for nome_digitado in nomes_turno:
             nome_digitado = nome_digitado.strip()
@@ -229,7 +227,17 @@ if st.session_state['dados_busca']:
                     turnos_calculados[adm_id] += 1
                     break 
     
-    # 2.2 PREPARAÇÃO DOS DADOS FINAIS
+    # 2.2 CÁLCULO DA META DINÂMICA GERAL
+    total_ligacoes_equipe = 0
+    total_turnos_equipe = sum(turnos_calculados.values())
+    
+    for stats in stats_aircall.values():
+        total_ligacoes_equipe += stats["inbound"] + stats["outbound"]
+        
+    # A Mágica: Qual é a média de ligações que cai em 1 único turno?
+    meta_justa_por_turno = total_ligacoes_equipe / total_turnos_equipe if total_turnos_equipe > 0 else 0
+
+    # 2.3 PREPARAÇÃO DOS DADOS FINAIS
     tabela_dados = []
     
     for adm_id, stats in stats_aircall.items():
@@ -239,15 +247,24 @@ if st.session_state['dados_busca']:
         total_atendidas = inb + outb
         turnos_agente = turnos_calculados[adm_id]
         
-        media = (total_atendidas / turnos_agente) if turnos_agente > 0 else 0
-        bateu_meta = "✅ Sim" if (media >= meta_por_turno and turnos_agente > 0) else ("❌ Não" if turnos_agente > 0 else "-")
+        # Meta do agente baseada nos dias que ele trabalhou
+        meta_individual = meta_justa_por_turno * turnos_agente
+        
+        # Avaliação de Desempenho
+        if turnos_agente > 0:
+            if total_atendidas >= meta_individual:
+                situacao = "✅ Acima da média"
+            else:
+                situacao = "❌ Abaixo da média"
+        else:
+            situacao = "-"
             
         tabela_dados.append({
             "Agente": nome,
             "Turnos Escalados": turnos_agente,
-            "Total Ligações": total_atendidas,
-            "Média Alcançada (por turno)": f"{media:.1f}",
-            "Bateu a Meta?": bateu_meta,
+            "Realizado": total_atendidas,
+            "Meta Esperada": float(f"{meta_individual:.1f}"), # Formata com 1 casa decimal
+            "Situação": situacao,
             "📥 Inbound": inb,
             "📤 Outbound": outb,
             "🔄 Transferidas": stats["transferidas"]
@@ -256,15 +273,23 @@ if st.session_state['dados_busca']:
     if tabela_dados:
         df_resultado = pd.DataFrame(tabela_dados)
         
-        st.subheader("🏆 Resultado de Produtividade vs Escala")
+        st.subheader("🏆 Análise de Produtividade Justa")
+        
+        # Exibe um resumo matemático no topo para transparência com a equipe
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total de Ligações do Time", total_ligacoes_equipe)
+        c2.metric("Total de Turnos na Escala", total_turnos_equipe)
+        c3.metric("Média de Ligações por Turno", f"{meta_justa_por_turno:.1f}")
+        
+        st.markdown("A **Meta Esperada** na tabela abaixo é calculada multiplicando a *Média de Ligações por Turno* pela quantidade de *Turnos Escalados* de cada agente.")
         
         st.dataframe(
-            df_resultado.sort_values(by="Total Ligações", ascending=False),
+            df_resultado.sort_values(by="Realizado", ascending=False),
             use_container_width=True,
             hide_index=True
         )
 
-        # 2.3 EXIBIÇÃO DOS DETALHES POR AGENTE
+        # 2.4 EXIBIÇÃO DOS DETALHES POR AGENTE
         st.markdown("---")
         st.subheader("🔎 Detalhamento de Ligações por Agente")
         
