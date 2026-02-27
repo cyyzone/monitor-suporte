@@ -207,10 +207,20 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
-                user = call.get('user')
-                email = user.get('email') if user else None
+                # Vamos procurar e-mails em todos os envolvidos na ligação
+                emails_envolvidos = set()
                 
-                if email not in AGENTS_MAP:
+                # Verificamos o dono final, quem transferiu e quem recebeu
+                for campo in ['user', 'transferred_by', 'transferred_to']:
+                    obj = call.get(campo)
+                    if obj and isinstance(obj, dict) and obj.get('email'):
+                        emails_envolvidos.add(obj.get('email'))
+                
+                # Filtramos para manter apenas quem realmente é do seu time
+                emails_do_time = [e for e in emails_envolvidos if e in AGENTS_MAP]
+                
+                # Se ninguém do seu mapa participou, ignoramos a ligação
+                if not emails_do_time:
                     continue 
 
                 status = call.get('status')
@@ -218,19 +228,20 @@ def get_aircall_stats(ts_inicio):
                 if status == 'done':
                     total_atendidas += 1
                     
-                    intercom_id = AGENTS_MAP[email]
-                    stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
-                    
-                    if intercom_id not in detalhes_ligacoes: detalhes_ligacoes[intercom_id] = []
-                    
-                    # --- CORREÇÃO DO LINK AQUI ---
-                    # Agora aponta direto para o recording no assets
-                    detalhes_ligacoes[intercom_id].append({
-                        'id': call['id'],
-                        'started_at': call.get('started_at', 0),
-                        'link': f"https://assets.aircall.io/calls/{call['id']}/recording", 
-                        'number': call.get('raw_digits', 'Desconhecido')
-                    })
+                    # Contabilizamos para cada agente do time que encostou na ligação
+                    for email in emails_do_time:
+                        intercom_id = AGENTS_MAP[email]
+                        stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
+                        
+                        if intercom_id not in detalhes_ligacoes: 
+                            detalhes_ligacoes[intercom_id] = []
+                        
+                        detalhes_ligacoes[intercom_id].append({
+                            'id': call['id'],
+                            'started_at': call.get('started_at', 0),
+                            'link': f"https://assets.aircall.io/calls/{call['id']}/recording", 
+                            'number': call.get('raw_digits', 'Desconhecido')
+                        })
                             
                 elif status == 'missed': 
                     total_perdidas += 1
@@ -557,5 +568,6 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
