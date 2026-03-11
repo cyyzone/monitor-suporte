@@ -207,15 +207,24 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
+                status = call.get('status')
+                
+                # --- CORREÇÃO AQUI ---
+                # 1. Contabiliza as perdidas ANTES do filtro de agentes 
+                # (já que ligações perdidas não têm agente atribuído)
+                if status in ['missed', 'voicemail']:
+                    total_perdidas += 1
+                    continue # Pula para a próxima chamada da lista
+                    
                 emails_envolvidos = set()
                 
-                # 1. Verifica o dono final e os campos de transferência diretos
+                # 2. Verifica o dono final e os campos de transferência diretos
                 for campo in ['user', 'transferred_by', 'transferred_to']:
                     obj = call.get(campo)
                     if obj and isinstance(obj, dict) and obj.get('email'):
                         emails_envolvidos.add(obj.get('email').lower())
                         
-                # 2. Verifica a lista completa de utilizadores (users) que participaram
+                # 3. Verifica a lista completa de utilizadores (users) que participaram
                 for u in call.get('users', []):
                     if isinstance(u, dict) and u.get('email'):
                         emails_envolvidos.add(u['email'].lower())
@@ -227,8 +236,6 @@ def get_aircall_stats(ts_inicio):
                 if not emails_da_equipa:
                     continue 
 
-                status = call.get('status')
-                
                 if status == 'done':
                     total_atendidas += 1
                     
@@ -250,9 +257,6 @@ def get_aircall_stats(ts_inicio):
                                 'number': call.get('raw_digits', 'Desconhecido')
                             })
                             
-                elif status == 'missed': 
-                    total_perdidas += 1
-            
             if data.get('meta', {}).get('next_page_link'):
                 page += 1
             else:
@@ -575,6 +579,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
