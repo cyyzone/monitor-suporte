@@ -193,7 +193,7 @@ def get_aircall_stats(ts_inicio):
     total_perdidas = 0
     page = 1
     
-    # Colocamos o seu número principal aqui (tudo junto, sem espaços)
+    # Número de Atendimento
     NUMERO_PRINCIPAL = "+554139060321"
     
     while True:
@@ -210,47 +210,47 @@ def get_aircall_stats(ts_inicio):
                 break
                 
             for call in calls:
-                status = call.get('status')
+                status = call.get('status', '')
                 
-                # Só analisamos chamadas que já foram concluídas (seja atendida ou perdida)
-                if status != 'done':
+                # Ignora apenas chamadas que AINDA estão rolando ('initial', 'in_progress', etc)
+                if status not in ['done', 'missed', 'voicemail']:
                     continue
                 
-                # --- NOVO FILTRO DE LINHA PARA PERDIDAS ---
-                if call.get('missed_call_reason'):
-                    # Pega o número interno (a linha) que recebeu a ligação
-                    linha_recebedora = call.get('number', {}).get('digits', '')
-                    
-                    # Só contabiliza a perda se tocou no número principal
+                # 1. Pega a linha da empresa que recebeu a chamada e limpa os espaços
+                numero_obj = call.get('number')
+                linha_recebedora = ""
+                if isinstance(numero_obj, dict):
+                    linha_recebedora = numero_obj.get('digits', '').replace(" ", "")
+                
+                # 2. Descobre se foi perdida (pelo status OU pelo motivo)
+                foi_perdida = (status in ['missed', 'voicemail']) or bool(call.get('missed_call_reason'))
+                
+                if foi_perdida:
+                    # Só contabiliza se tocou no número principal
                     if linha_recebedora == NUMERO_PRINCIPAL:
                         total_perdidas += 1
-                        
-                    continue # Já validamos a perda, pula para a próxima chamada
+                    continue # Já contamos a perda, pula para a próxima chamada
                     
+                # Se o código passou daqui, a chamada foi ATENDIDA com sucesso ('done')
                 emails_envolvidos = set()
                 
-                # Verifica o dono final e os campos de transferência diretos
                 for campo in ['user', 'transferred_by', 'transferred_to']:
                     obj = call.get(campo)
                     if obj and isinstance(obj, dict) and obj.get('email'):
                         emails_envolvidos.add(obj.get('email').lower())
                         
-                # Verifica a lista completa de utilizadores que participaram
                 for u in call.get('users', []):
                     if isinstance(u, dict) and u.get('email'):
                         emails_envolvidos.add(u['email'].lower())
                 
-                # Mantém apenas os e-mails que existem no seu mapeamento
                 emails_da_equipa = [e for e in emails_envolvidos if e in AGENTS_MAP]
                 
-                # Se ninguém da sua equipa tocou nesta chamada, ignoramos
                 if not emails_da_equipa:
                     continue 
 
-                # Se chegou até aqui, a chamada foi atendida por alguém da equipe
+                # Soma como ligação atendida pela equipe
                 total_atendidas += 1
                 
-                # Contabiliza a chamada para todos os agentes da equipa que participaram
                 for email in emails_da_equipa:
                     intercom_id = AGENTS_MAP[email]
                     stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
@@ -258,7 +258,6 @@ def get_aircall_stats(ts_inicio):
                     if intercom_id not in detalhes_ligacoes: 
                         detalhes_ligacoes[intercom_id] = []
                     
-                    # Trava para não duplicar o registo da mesma chamada na lista do agente
                     ids_ja_registados = [item['id'] for item in detalhes_ligacoes[intercom_id]]
                     if call['id'] not in ids_ja_registados:
                         detalhes_ligacoes[intercom_id].append({
@@ -590,6 +589,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
