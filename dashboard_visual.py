@@ -209,53 +209,58 @@ def get_aircall_stats(ts_inicio):
             for call in calls:
                 status = call.get('status')
                 
-                # --- CORREÇÃO AQUI ---
-                # 1. Contabiliza as perdidas ANTES do filtro de agentes 
-                # (já que ligações perdidas não têm agente atribuído)
-                if status in ['missed', 'voicemail']:
+                # Só analisamos chamadas que já foram concluídas (seja atendida ou perdida)
+                if status != 'done':
+                    continue
+                
+                # --- CORREÇÃO DEFINITIVA ---
+                # A API do Aircall retorna status = 'done' para todas.
+                # O que indica que ela foi perdida (abandonada, fora do horário, etc)
+                # é a presença do campo 'missed_call_reason'.
+                if call.get('missed_call_reason'):
                     total_perdidas += 1
-                    continue # Pula para a próxima chamada da lista
+                    continue # Já contamos a perda, pula para a próxima chamada
                     
                 emails_envolvidos = set()
                 
-                # 2. Verifica o dono final e os campos de transferência diretos
+                # Verifica o dono final e os campos de transferência diretos
                 for campo in ['user', 'transferred_by', 'transferred_to']:
                     obj = call.get(campo)
                     if obj and isinstance(obj, dict) and obj.get('email'):
                         emails_envolvidos.add(obj.get('email').lower())
                         
-                # 3. Verifica a lista completa de utilizadores (users) que participaram
+                # Verifica a lista completa de utilizadores que participaram
                 for u in call.get('users', []):
                     if isinstance(u, dict) and u.get('email'):
                         emails_envolvidos.add(u['email'].lower())
                 
-                # Mantém apenas os e-mails que existem no seu AGENTS_MAP
+                # Mantém apenas os e-mails que existem no seu mapeamento
                 emails_da_equipa = [e for e in emails_envolvidos if e in AGENTS_MAP]
                 
                 # Se ninguém da sua equipa tocou nesta chamada, ignoramos
                 if not emails_da_equipa:
                     continue 
 
-                if status == 'done':
-                    total_atendidas += 1
+                # Se chegou até aqui, a chamada foi atendida por alguém da equipe
+                total_atendidas += 1
+                
+                # Contabiliza a chamada para todos os agentes da equipa que participaram
+                for email in emails_da_equipa:
+                    intercom_id = AGENTS_MAP[email]
+                    stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
                     
-                    # Contabiliza a chamada para todos os agentes da equipa que participaram
-                    for email in emails_da_equipa:
-                        intercom_id = AGENTS_MAP[email]
-                        stats_agente[intercom_id] = stats_agente.get(intercom_id, 0) + 1
-                        
-                        if intercom_id not in detalhes_ligacoes: 
-                            detalhes_ligacoes[intercom_id] = []
-                        
-                        # Trava para não duplicar o registo da mesma chamada na lista do agente
-                        ids_ja_registados = [item['id'] for item in detalhes_ligacoes[intercom_id]]
-                        if call['id'] not in ids_ja_registados:
-                            detalhes_ligacoes[intercom_id].append({
-                                'id': call['id'],
-                                'started_at': call.get('started_at', 0),
-                                'link': f"https://assets.aircall.io/calls/{call['id']}/recording", 
-                                'number': call.get('raw_digits', 'Desconhecido')
-                            })
+                    if intercom_id not in detalhes_ligacoes: 
+                        detalhes_ligacoes[intercom_id] = []
+                    
+                    # Trava para não duplicar o registo da mesma chamada na lista do agente
+                    ids_ja_registados = [item['id'] for item in detalhes_ligacoes[intercom_id]]
+                    if call['id'] not in ids_ja_registados:
+                        detalhes_ligacoes[intercom_id].append({
+                            'id': call['id'],
+                            'started_at': call.get('started_at', 0),
+                            'link': f"https://assets.aircall.io/calls/{call['id']}/recording", 
+                            'number': call.get('raw_digits', 'Desconhecido')
+                        })
                             
             if data.get('meta', {}).get('next_page_link'):
                 page += 1
@@ -266,7 +271,7 @@ def get_aircall_stats(ts_inicio):
             break
             
     return stats_agente, total_atendidas, total_perdidas, detalhes_ligacoes
-
+    
 # @st.fragment faz esse pedaço rodar sozinho a cada 60s
 @st.fragment(run_every=60)
 def atualizar_painel():
@@ -579,6 +584,7 @@ def atualizar_painel():
         """)
 
 atualizar_painel()
+
 
 
 
