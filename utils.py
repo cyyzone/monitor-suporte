@@ -5,12 +5,12 @@ import pymongo
 import datetime
 import extra_streamlit_components as stx
 
-@st.cache_resource
 def get_cookie_manager():
-    return stx.CookieManager()
+    # Sem o st.cache_resource aqui e com uma chave de identificação
+    return stx.CookieManager(key="auth_cookie_manager")
 
 def check_password():
-    """Gere a autenticacao via secrets e guarda a sessao em Cookies."""
+    """Gerencia a autenticacao via secrets e guarda a sessao em Cookies."""
     if "APP_PASSWORD" not in st.secrets:
         st.error("ERRO: Configure 'APP_PASSWORD' no ficheiro .streamlit/secrets.toml")
         return False
@@ -36,14 +36,14 @@ def check_password():
         return True
 
     st.text_input(
-        "🔒 Digite a palavra-passe de acesso:", 
+        "🔒 Digite a senha de acesso:", 
         type="password",
         on_change=password_entered,
         key="password"
     )
     
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("😕 Palavra-passe incorreta.")
+        st.error("😕 Senha incorreta.")
         
     return False
 
