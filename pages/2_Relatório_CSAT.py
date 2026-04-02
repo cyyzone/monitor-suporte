@@ -239,20 +239,25 @@ if 'dados_csat' in st.session_state: # Se já tenho dados na memória
         resumo['CSAT Ajustado'] = resumo.apply(lambda row: (row['Positivas'] / (row['Positivas'] + row['Negativas']) * 100) if (row['Positivas'] + row['Negativas']) > 0 else 0, axis=1)
         resumo['CSAT Real'] = resumo.apply(lambda row: (row['Positivas'] / row['Total'] * 100) if row['Total'] > 0 else 0, axis=1)
         
-        # Formato pra ficar bonito (ex: 95.5%).
+        # Formato pra ficar bonito (ex: 95.5%)
         resumo['CSAT Ajustado'] = resumo['CSAT Ajustado'].map('{:.1f}%'.format)
         resumo['CSAT Real'] = resumo['CSAT Real'].map('{:.1f}%'.format)
-        # Troco os nomes das colunas pra emojis.
+        
+        # Troco os nomes das colunas pra emojis
         resumo = resumo.rename(columns={'Positivas': '😍', 'Neutras': '😐', 'Negativas': '😡', 'Total': 'Avaliações'})
         
+        resumo_fixo = resumo.set_index(["Agente", "CSAT Ajustado", "CSAT Real"])
+        
         st.subheader("Resumo por Agente")
-        cols_order = ["Agente", "CSAT (Ajustado)", "CSAT (Real)", "Avaliações", "😍", "😐", "😡"] # Defino a ordem das colunas.
+        
+        # A ordem agora leva só as colunas normais, porque o índice já aparece primeiro automaticamente
+        cols_order = ["Avaliações", "😍", "😐", "😡"] 
+        
         st.dataframe(
-            resumo, 
+            resumo_fixo, 
             use_container_width=True, 
-            hide_index=True, 
-            column_order=cols_order,
-            pin_columns=["Agente", "CSAT Ajustado", "CSAT Real"]
+            column_order=cols_order
+            # REMOVA o hide_index=True, caso contrário suas colunas fixas vão sumir!
         )
 
     st.divider()
