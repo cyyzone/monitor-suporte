@@ -247,7 +247,13 @@ if 'dados_csat' in st.session_state: # Se já tenho dados na memória
         
         st.subheader("Resumo por Agente")
         cols_order = ["Agente", "CSAT (Ajustado)", "CSAT (Real)", "Avaliações", "😍", "😐", "😡"] # Defino a ordem das colunas.
-        st.dataframe(resumo, use_container_width=True, hide_index=True, column_order=cols_order)
+        st.dataframe(
+            resumo, 
+            use_container_width=True, 
+            hide_index=True, 
+            column_order=cols_order,
+            pin_columns=["Agente", "CSAT Ajustado", "CSAT Real"]
+        )
 
     st.divider()
 # --- TABELA DE DETALHES (FILTRÁVEL) ---
