@@ -12,7 +12,7 @@ if not check_password():
     st.stop()
 
 st.title("📞 Relatório de Telefonia da Equipe")
-st.markdown("Acompanhe o volume de ligações (Inbound/Outbound), tempo de conversação e transferências.")
+st.markdown("Acompanhe o volume de ligações recebidas, ativas e tempo de conversação.")
 
 FUSO_BR = timezone(timedelta(hours=-3))
 
@@ -143,7 +143,6 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                     else:
                         stats_por_id[adm_id]["outbound"] += 1
                         
-                        # Nova regra: valida se existe o horário de atendimento e se não há motivo de perda
                         atendida_de_fato = call.get('answered_at') is not None and not call.get('missed_call_reason')
                         
                         if atendida_de_fato:
@@ -216,7 +215,6 @@ if st.session_state['dados_relatorio'] is not None:
     lista_detalhes_export = []
     
     geral_inbound = 0
-    geral_outbound = 0
     geral_outbound_atendidas = 0 
     geral_transferidas = 0
     geral_duracao = 0
@@ -233,12 +231,11 @@ if st.session_state['dados_relatorio'] is not None:
             destinos_formatados = ", ".join(textos)
         
         inb = stats["inbound"]
-        outb = stats["outbound"]
         outb_atendidas = stats.get("outbound_atendidas", 0)
         transf = stats["transferidas"]
         duracao_total_agente = stats["duracao_total"]
         
-        total_atendidas = inb + outb
+        total_atendidas = inb + outb_atendidas
         
         if total_atendidas > 0:
             tempo_medio = duracao_total_agente / total_atendidas
@@ -246,7 +243,6 @@ if st.session_state['dados_relatorio'] is not None:
             tempo_medio = 0
         
         geral_inbound += inb
-        geral_outbound += outb
         geral_outbound_atendidas += outb_atendidas
         geral_transferidas += transf
         geral_duracao += duracao_total_agente
@@ -254,8 +250,7 @@ if st.session_state['dados_relatorio'] is not None:
         tabela_dados.append({
             "Agente": nome,
             "📥 Inbound": inb,
-            "📤 Outbound (Total)": outb,
-            "📞 Outbound (Atendidas)": outb_atendidas,
+            "📤 Outbound (Atendidas)": outb_atendidas,
             "🔄 Transferidas": transf,
             "⏱️ Tempo Total": formatar_segundos(duracao_total_agente),
             "⏳ Tempo Médio": formatar_segundos(tempo_medio),
@@ -292,15 +287,14 @@ if st.session_state['dados_relatorio'] is not None:
             if not df_detalhes_geral.empty:
                 df_detalhes_geral.to_excel(writer, sheet_name='Detalhamento', index=False)
         
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Inbound (Recebidas)", geral_inbound)
-        c2.metric("Outbound (Total)", geral_outbound)
-        c3.metric("Outbound (Atendidas)", geral_outbound_atendidas)
-        c4.metric("Tempo Total", formatar_segundos(geral_duracao))
+        c2.metric("Outbound (Atendidas)", geral_outbound_atendidas)
+        c3.metric("Tempo Total em Linha", formatar_segundos(geral_duracao))
         
-        geral_total_ligacoes = geral_inbound + geral_outbound
+        geral_total_ligacoes = geral_inbound + geral_outbound_atendidas
         geral_media = geral_duracao / geral_total_ligacoes if geral_total_ligacoes > 0 else 0
-        c5.metric("Tempo Médio Equipe", formatar_segundos(geral_media))
+        c4.metric("Tempo Médio da Equipe", formatar_segundos(geral_media))
         
         st.download_button(
             label="📥 Baixar Relatório Completo em Excel",
@@ -310,19 +304,19 @@ if st.session_state['dados_relatorio'] is not None:
         )
         
         st.markdown("### 👥 Produtividade por Agente")
-        df_geral = df_geral.sort_values(by=["📞 Outbound (Atendidas)", "📥 Inbound"], ascending=[False, False])
+        df_geral = df_geral.sort_values(by=["📤 Outbound (Atendidas)", "📥 Inbound"], ascending=[False, False])
         st.dataframe(df_geral, use_container_width=True, hide_index=True)
         
         st.markdown("---")
         st.subheader("🔎 Detalhamento de Ligações por Agente")
         
         for adm_id, stats in stats_aircall.items():
-            total_interacoes = stats["inbound"] + stats["outbound"] + stats["transferidas"]
+            total_interacoes = stats["inbound"] + stats.get("outbound_atendidas", 0) + stats["transferidas"]
             
-            if total_interacoes > 0:
+            if len(stats["detalhes"]) > 0:
                 nome = admins.get(adm_id, f"ID {adm_id}")
                 
-                with st.expander(f"👤 {nome} (Total: {total_interacoes} interações)"):
+                with st.expander(f"👤 {nome}"):
                     detalhes = stats["detalhes"]
                     
                     for d in detalhes:
