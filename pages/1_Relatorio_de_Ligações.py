@@ -17,7 +17,7 @@ st.markdown("Acompanhe o volume de ligações (Inbound/Outbound), tempo de conve
 # Fuso horário de Brasília
 FUSO_BR = timezone(timedelta(hours=-3))
 
-# --- MAPEAMENTO AIRCALL (Email -> ID Intercom para pegar o nome visual) ---
+# Mapeamento Aircall (Email -> ID Intercom para pegar o nome visual)
 AGENTS_MAP = {
     "rhayslla.junca@produttivo.com.br": "5281911",
     "douglas.david@produttivo.com.br": "5586698",
@@ -28,7 +28,7 @@ AGENTS_MAP = {
     "marcelo.misugi@produttivo.com.br": "8126602"
 }
 
-# --- Função Auxiliar: Formatar Segundos ---
+# Função Auxiliar: Formatar Segundos
 def formatar_segundos(segundos):
     """Transforma segundos em HH:MM:SS ou MM:SS"""
     if pd.isna(segundos) or segundos == 0:
@@ -42,7 +42,7 @@ def formatar_segundos(segundos):
         return f"{h:02d}:{m:02d}:{s:02d}"
     return f"{m:02d}:{s:02d}"
 
-# --- Busca de Nomes ---
+# Busca de Nomes
 @st.cache_data(ttl=300, show_spinner=False)
 def get_admin_details():
     url = "https://api.intercom.io/admins" 
@@ -53,7 +53,7 @@ def get_admin_details():
             dados[str(admin['id'])] = admin['name']
     return dados
 
-# --- Função de Busca Aircall Detalhada ---
+# Função de Busca Aircall Detalhada
 @st.cache_data(ttl=300, show_spinner=False)
 def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
     if "AIRCALL_ID" not in st.secrets or "AIRCALL_TOKEN" not in st.secrets:
@@ -74,6 +74,7 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
         adm_id: {
             "inbound": 0, 
             "outbound": 0, 
+            "outbound_atendidas": 0, 
             "transferidas": 0, 
             "duracao_total": 0, 
             "destinos": [], 
@@ -147,7 +148,12 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                         dir_str = "Entrada (In)"
                     else:
                         stats_por_id[adm_id]["outbound"] += 1
-                        acao_str = "📤 Ligou"
+                        # Nova lógica para verificar se o cliente atendeu a ligação ativa
+                        if duracao > 0:
+                            stats_por_id[adm_id]["outbound_atendidas"] += 1
+                            acao_str = "📤 Ligou (Atendida)"
+                        else:
+                            acao_str = "📤 Ligou (Não Atendida)"
                         dir_str = "Saída (Out)"
 
                     stats_por_id[adm_id]["detalhes"].append({
@@ -174,7 +180,7 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
 if 'dados_relatorio' not in st.session_state:
     st.session_state['dados_relatorio'] = None
 
-# --- Filtros de Data na Tela ---
+# Filtros de Data na Tela
 col1, col2, col3 = st.columns([1, 1, 2])
 with col1:
     data_inicio = st.date_input("Data de Início", datetime.today() - timedelta(days=7))
@@ -218,6 +224,7 @@ if st.session_state['dados_relatorio'] is not None:
     
     geral_inbound = 0
     geral_outbound = 0
+    geral_outbound_atendidas = 0 
     geral_transferidas = 0
     geral_duracao = 0
     
@@ -234,6 +241,7 @@ if st.session_state['dados_relatorio'] is not None:
         
         inb = stats["inbound"]
         outb = stats["outbound"]
+        outb_atendidas = stats["outbound_atendidas"]
         transf = stats["transferidas"]
         duracao_total_agente = stats["duracao_total"]
         
@@ -246,13 +254,15 @@ if st.session_state['dados_relatorio'] is not None:
         
         geral_inbound += inb
         geral_outbound += outb
+        geral_outbound_atendidas += outb_atendidas
         geral_transferidas += transf
         geral_duracao += duracao_total_agente
             
         tabela_dados.append({
             "Agente": nome,
             "📥 Inbound": inb,
-            "📤 Outbound": outb,
+            "📤 Outbound (Total)": outb,
+            "📞 Outbound (Atendidas)": outb_atendidas,
             "🔄 Transferidas": transf,
             "⏱️ Tempo Total": formatar_segundos(duracao_total_agente),
             "⏳ Tempo Médio": formatar_segundos(tempo_medio),
@@ -289,14 +299,16 @@ if st.session_state['dados_relatorio'] is not None:
             if not df_detalhes_geral.empty:
                 df_detalhes_geral.to_excel(writer, sheet_name='Detalhamento', index=False)
         
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Inbound (Recebidas)", geral_inbound)
-        c2.metric("Total Outbound (Feitas)", geral_outbound)
-        c3.metric("Tempo Total em Linha", formatar_segundos(geral_duracao))
+        # Agora temos 5 cartões para mostrar a nova métrica no topo
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Inbound (Recebidas)", geral_inbound)
+        c2.metric("Outbound (Total)", geral_outbound)
+        c3.metric("Outbound (Atendidas)", geral_outbound_atendidas)
+        c4.metric("Tempo Total", formatar_segundos(geral_duracao))
         
         geral_total_ligacoes = geral_inbound + geral_outbound
         geral_media = geral_duracao / geral_total_ligacoes if geral_total_ligacoes > 0 else 0
-        c4.metric("Tempo Médio da Equipe", formatar_segundos(geral_media))
+        c5.metric("Tempo Médio Equipe", formatar_segundos(geral_media))
         
         st.download_button(
             label="📥 Baixar Relatório Completo em Excel",
@@ -306,7 +318,7 @@ if st.session_state['dados_relatorio'] is not None:
         )
         
         st.markdown("### 👥 Produtividade por Agente")
-        df_geral = df_geral.sort_values(by=["📥 Inbound", "📤 Outbound"], ascending=[False, False])
+        df_geral = df_geral.sort_values(by=["📞 Outbound (Atendidas)", "📥 Inbound"], ascending=[False, False])
         st.dataframe(df_geral, use_container_width=True, hide_index=True)
         
         st.markdown("---")
