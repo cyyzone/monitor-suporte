@@ -71,6 +71,15 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                 duracao = call.get('duration', 0)
                 numero = call.get('raw_digits') or "Número Oculto"
                 
+                # NOVA REGRA: Extrair o nome do contato salvo
+                contact = call.get('contact') or {}
+                first_name = contact.get('first_name') or ""
+                last_name = contact.get('last_name') or ""
+                nome_contato = f"{first_name} {last_name}".strip()
+                
+                if not nome_contato:
+                    nome_contato = contact.get('company_name') or "Desconhecido"
+                
                 user_email = call.get('user', {}).get('email', '').lower() if call.get('user') else ""
                 
                 acao = "Atendida"
@@ -87,6 +96,7 @@ def buscar_dados_aircall_detalhados(ts_inicio, ts_fim):
                     "Ação": acao,
                     "Duração (seg)": duracao,
                     "Número Cliente": numero,
+                    "Nome Cliente": nome_contato,
                     "Admin_ID": adm_id
                 })
 
@@ -137,7 +147,8 @@ if gerar_relatorio:
                     "Direção": d["Direção"],
                     "Status": d["Ação"],
                     "Duração (min)": round(d["Duração (seg)"] / 60, 1),
-                    "Número Cliente": d["Número Cliente"]
+                    "Número Cliente": d["Número Cliente"],
+                    "Nome Cliente": d["Nome Cliente"]
                 })
                     
         st.session_state['df_picos'] = pd.DataFrame(todos_detalhes)
@@ -163,7 +174,6 @@ if 'df_picos' in st.session_state:
         if df_base.empty:
             st.warning("Não há ligações com este filtro no período.")
         else:
-            # 1. KPIs no topo
             st.markdown("### 🎯 Resumo da Escala")
             dias_unicos = df_base['Data'].nunique() or 1
             vol_por_hora = df_base.groupby('Hora').size()
@@ -211,11 +221,11 @@ if 'df_picos' in st.session_state:
             
             st.divider()
 
-            # Tabela de Clientes Recorrentes
             st.markdown("### 🔄 Clientes Recorrentes")
-            st.caption("Números que entraram em contato mais de uma vez no período e o tempo investido neles.")
+            st.caption("Contatos que ligaram mais de uma vez no período e o tempo investido neles.")
             
-            recorrentes = df_base.groupby('Número Cliente').agg(
+            # Aqui adicionamos a coluna de Nome Cliente no agrupamento
+            recorrentes = df_base.groupby(['Número Cliente', 'Nome Cliente']).agg(
                 Qtd_Ligacoes=('Status', 'count'),
                 Tempo_Total=('Duração (min)', 'sum'),
                 Tempo_Medio=('Duração (min)', 'mean')
@@ -230,7 +240,6 @@ if 'df_picos' in st.session_state:
             else:
                 st.dataframe(recorrentes, use_container_width=True, hide_index=True)
 
-            # Botão de Exportação
             csv = df_base.to_csv(index=False, sep=';').encode('utf-8-sig')
             st.download_button(
                 label="📥 Baixar Dados da Escala",
