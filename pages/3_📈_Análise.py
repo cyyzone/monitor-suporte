@@ -235,8 +235,8 @@ if 'df_picos' in st.session_state:
             c_graf1, c_graf2 = st.columns(2)
             
             with c_graf1:
-                st.markdown("**✔️ Ligações Atendidas**")
-                df_atendidas_graf = df_base[df_base["Status"] == "Atendida"]
+                st.markdown("**✔️ Ligações Atendidas (Linhas Principais)**")
+                df_atendidas_graf = df_principal[df_principal["Status"] == "Atendida"]
                 if not df_atendidas_graf.empty:
                     vol_atendidas = df_atendidas_graf.groupby('Hora').size().reset_index(name='Volume')
                     fig_atendidas = px.bar(vol_atendidas, x='Hora', y='Volume', color_discrete_sequence=["#2B6CB0"], text='Volume')
