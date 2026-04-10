@@ -204,8 +204,8 @@ if 'df_picos' in st.session_state:
             dia_pico = df_base.groupby('Dia da Semana').size().idxmax().split('-')[1] if not df_base.empty else "N/A"
             duracao_media = round(df_base[df_base["Status"] == "Atendida"]["Duração (min)"].mean(), 1)
             
-            # Aqui está a alteração: retiramos "Pausa/Treinamento" desta lista
-            perdas_lista = ["Fora do Horário", "Abandonada", "Não Atendida", "Voicemail"]
+            # Removemos o "Fora do Horário" e "Pausa/Treinamento" daqui para focar apenas nas perdas em horário de trabalho
+            perdas_lista = ["Abandonada", "Não Atendida", "Voicemail"]
             
             condicao_principal = (
                 df_base["Linha Digitos"].astype(str).str.contains("39060321|35421328", na=False, regex=True) |
@@ -244,7 +244,6 @@ if 'df_picos' in st.session_state:
                     vol_perdidas = df_perdidas_graf.groupby(['Hora', 'Status']).size().reset_index(name='Volume')
                     fig_perdidas = px.bar(vol_perdidas, x='Hora', y='Volume', color='Status',
                                       color_discrete_map={
-                                          "Fora do Horário": "#A0AEC0",
                                           "Abandonada": "#E53E3E", 
                                           "Não Atendida": "#DD6B20",
                                           "Voicemail": "#ED8936"
