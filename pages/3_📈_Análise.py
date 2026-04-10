@@ -205,13 +205,20 @@ if 'df_picos' in st.session_state:
             duracao_media = round(df_base[df_base["Status"] == "Atendida"]["Duração (min)"].mean(), 1)
             
             perdas_lista = ["Fora do Horário", "Pausa/Treinamento", "Abandonada", "Não Atendida", "Voicemail"]
-            taxa_perda = round((len(df_base[df_base["Status"].isin(perdas_lista)]) / len(df_base)) * 100, 1) if len(df_base) > 0 else 0
+            
+            # Filtra todas as chamadas apenas da linha principal para o cálculo da métrica
+            df_principal = df_base[
+                df_base["Linha Digitos"].astype(str).str.contains("39060321", na=False) |
+                df_base["Linha Nome"].astype(str).str.contains("Produttivo - Atendimento", case=False, na=False)
+            ]
+            
+            taxa_perda = round((len(df_principal[df_principal["Status"].isin(perdas_lista)]) / len(df_principal)) * 100, 1) if len(df_principal) > 0 else 0
 
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Horário de Maior Pico", hora_pico)
             k2.metric("Dia Mais Crítico", dia_pico)
             k3.metric("Tempo Médio por Chamada", f"{duracao_media} min")
-            k4.metric("Taxa de Perda", f"{taxa_perda}%")
+            k4.metric("Taxa Perda (Linha Principal)", f"{taxa_perda}%")
             
             st.divider()
 
